@@ -40,16 +40,19 @@ document.addEventListener("DOMContentLoaded", () => {
         toastEl.addEventListener('hidden.bs.toast', () => toastEl.remove());
     };
 
-    const fetchData = async(endpoint) => {
+    const fetchData = async (endpoint) => {
         try {
+            console.log(`🔍 Fetching: ${endpoint}`); // Debug log
             const headers = { 'Authorization': `Bearer ${token}` };
             const response = await fetch(`${API_BASE_URL}${endpoint}`, { headers });
-            
+
             // *** IMPROVED ERROR HANDLING ***
             if (!response.ok) {
-                const errorData = await response.json().catch(() => null); 
+                const errorData = await response.json().catch(() => null);
                 const errorMessage = errorData?.message || `HTTP error! Status: ${response.status}`;
-                
+
+                console.error(`❌ Error response:`, errorData); // Debug log
+
                 if (response.status === 401 || response.status === 403) {
                     mainContent.innerHTML = `<div class="alert alert-danger m-4"><h4>Access Denied</h4><p>${errorMessage}</p><p>You will be redirected to the login page shortly.</p></div>`;
                     setTimeout(() => {
@@ -68,7 +71,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     };
 
-    const submitForm = async(endpoint, method, data, callback) => {
+    const submitForm = async (endpoint, method, data, callback) => {
         try {
             const headers = { "Content-Type": "application/json", 'Authorization': `Bearer ${token}` };
             const filteredData = Object.fromEntries(Object.entries(data).filter(([_, v]) => v != null && v !== ''));
@@ -81,7 +84,12 @@ document.addEventListener("DOMContentLoaded", () => {
                 const err = await response.json();
                 throw new Error(err.message || "Form submission failed");
             }
-            formModal.hide();
+            if (formModal._element.classList.contains('show')) {
+                formModal.hide();
+            }
+            if (detailsModal._element.classList.contains('show')) {
+                detailsModal.hide();
+            }
             callback();
             showToast(`Record has been ${method === "POST" ? "created" : "updated"} successfully.`);
         } catch (error) {
@@ -90,24 +98,48 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     };
 
-    const deleteItem = async(endpoint, typeName, refreshCallback) => {
-        if (confirm(`Are you sure you want to delete this ${typeName}?`)) {
+    const deleteItem = async (endpoint, typeName, refreshCallback) => {
+        const confirmationModalHTML = `
+            <div class="modal fade" id="confirmationModal" tabindex="-1">
+                <div class="modal-dialog modal-dialog-centered">
+                    <div class="modal-content">
+                        <div class="modal-header"><h5 class="modal-title">Confirm Deletion</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                        <div class="modal-body"><p>Are you sure you want to delete this ${typeName}?</p></div>
+                        <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button type="button" class="btn btn-danger" id="confirmDeleteBtn">Delete</button></div>
+                    </div>
+                </div>
+            </div>`;
+        const existingModal = document.getElementById('confirmationModal');
+        if (existingModal) {
+            existingModal.remove();
+        }
+        document.body.insertAdjacentHTML('beforeend', confirmationModalHTML);
+        const confirmationModal = new bootstrap.Modal(document.getElementById('confirmationModal'));
+        confirmationModal.show();
+
+        document.getElementById('confirmDeleteBtn').onclick = async () => {
             try {
                 const headers = { 'Authorization': `Bearer ${token}` };
                 const response = await fetch(`${API_BASE_URL}${endpoint}`, { method: "DELETE", headers });
-                if (!response.ok) throw new Error("Deletion failed");
+                if (!response.ok) {
+                    const err = await response.json().catch(() => ({ message: "Deletion failed" }));
+                    throw new Error(err.message);
+                }
                 refreshCallback();
                 showToast(`${typeName.charAt(0).toUpperCase() + typeName.slice(1)} deleted successfully.`);
             } catch (error) {
                 console.error("Delete error:", error);
-                showToast("Could not delete record. It might be in use.", 'danger');
+                showToast(error.message || "Could not delete record.", 'danger');
+            } finally {
+                confirmationModal.hide();
+                document.getElementById('confirmationModal')?.remove();
             }
-        }
+        };
     };
 
     const createOptions = (items, valueField, textField, selectedValue) =>
         items.map((item) => `<option value="${item[valueField]}" ${item[valueField] == selectedValue ? "selected" : ""}>${item[textField]}</option>`).join("");
-    
+
     const renderSpinner = (target = mainContent) => {
         target.innerHTML = `<div class="d-flex justify-content-center align-items-center p-5"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div></div>`;
     };
@@ -148,7 +180,7 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     // --- PAGE LOADERS & RENDERERS ---
-    
+
     const loadDashboard = async () => {
         renderSpinner();
         const stats = await fetchData("/api/branch-manager/stats");
@@ -156,53 +188,55 @@ document.addEventListener("DOMContentLoaded", () => {
         mainContent.innerHTML = `
             <h1 class="h3 mb-4">Branch Dashboard</h1>
             <div class="row">
-                <div class="col-xl-4 col-md-6 mb-4"><div class="card glass-effect"><div class="card-body"><div class="row no-gutters align-items-center"><div class="col mr-2"><div class="text-xs text-primary text-uppercase mb-1 fw-bold">Scheduled Appointments</div><div class="h5 mb-0 fw-bold" id="appointment-count">${stats?.appointments ?? '...'}</div></div><div class="col-auto"><i class="bi bi-calendar-check-fill fs-2 text-secondary"></i></div></div></div></div></div>
-                <div class="col-xl-4 col-md-6 mb-4"><div class="card glass-effect"><div class="card-body"><div class="row no-gutters align-items-center"><div class="col mr-2"><div class="text-xs text-success text-uppercase mb-1 fw-bold">Staff Members</div><div class="h5 mb-0 fw-bold" id="staff-count">${stats?.staff ?? '...'}</div></div><div class="col-auto"><i class="bi bi-person-badge-fill fs-2 text-secondary"></i></div></div></div></div></div>
-                <div class="col-xl-4 col-md-6 mb-4"><div class="card glass-effect"><div class="card-body"><div class="row no-gutters align-items-center"><div class="col mr-2"><div class="text-xs text-info text-uppercase mb-1 fw-bold">Appointments Today</div><div class="h5 mb-0 fw-bold" id="today-count">${stats?.daily_appointments ?? '...'}</div></div><div class="col-auto"><i class="bi bi-clock-fill fs-2 text-secondary"></i></div></div></div></div></div>
+                <div class="col-xl-3 col-md-6 mb-4"><div class="card glass-effect"><div class="card-body"><div class="row no-gutters align-items-center"><div class="col mr-2"><div class="text-xs text-primary text-uppercase mb-1 fw-bold">Scheduled Today</div><div class="h5 mb-0 fw-bold">${stats.scheduled_today}</div></div><div class="col-auto"><i class="bi bi-calendar-day fs-2 text-secondary"></i></div></div></div></div></div>
+                <div class="col-xl-3 col-md-6 mb-4"><div class="card glass-effect"><div class="card-body"><div class="row no-gutters align-items-center"><div class="col mr-2"><div class="text-xs text-success text-uppercase mb-1 fw-bold">Completed Today</div><div class="h5 mb-0 fw-bold">${stats.completed_today}</div></div><div class="col-auto"><i class="bi bi-calendar-check fs-2 text-secondary"></i></div></div></div></div></div>
+                <div class="col-xl-3 col-md-6 mb-4"><div class="card glass-effect"><div class="card-body"><div class="row no-gutters align-items-center"><div class="col mr-2"><div class="text-xs text-danger text-uppercase mb-1 fw-bold">Canceled Today</div><div class="h5 mb-0 fw-bold">${stats.canceled_today}</div></div><div class="col-auto"><i class="bi bi-calendar-x fs-2 text-secondary"></i></div></div></div></div></div>
+                <div class="col-xl-3 col-md-6 mb-4"><div class="card glass-effect"><div class="card-body"><div class="row no-gutters align-items-center"><div class="col mr-2"><div class="text-xs text-info text-uppercase mb-1 fw-bold">Total Staff</div><div class="h5 mb-0 fw-bold">${stats.staff}</div></div><div class="col-auto"><i class="bi bi-people-fill fs-2 text-secondary"></i></div></div></div></div></div>
             </div>`;
     };
-    
+
     const loadPatientsPage = async () => {
-        createPageTemplate({ title: "Branch Patients", type: "patient", headers: ["ID", "Name", "Age", "Contact"] });
+        createPageTemplate({ title: "Manage Patients", type: "patient", headers: ["ID", "Name", "Age", "Contact"] });
         renderSpinner(document.getElementById("table-body"));
-        // *** CORRECTED API ENDPOINT ***
-        currentViewData = await fetchData("/api/branch-manager/patients"); 
+        console.log('🔍 About to fetch patients...'); // Debug
+        currentViewData = await fetchData("/api/patients");
+        console.log('📦 Patients data received:', currentViewData); // Debug
         if (!currentViewData) return;
         renderPatientsTable(currentViewData);
         setupSearch(renderPatientsTable, ['patient_id', 'name', 'contact_info']);
     };
-    
+
     const renderPatientsTable = (data) => {
         const tableBody = document.getElementById("table-body");
-        if (!data || data.length === 0) { tableBody.innerHTML = '<tr><td colspan="5" class="text-center p-4">No patients found for this branch.</td></tr>'; return; }
+        if (!data || data.length === 0) { tableBody.innerHTML = '<tr><td colspan="5" class="text-center p-4">No patients found. Add one to get started.</td></tr>'; return; }
         tableBody.innerHTML = data.map(p => `<tr><td>${p.patient_id}</td><td>${p.name}</td><td>${p.age ?? 'N/A'}</td><td>${p.contact_info || ""}</td><td class="table-actions"><button class="btn btn-sm btn-outline-secondary" data-action="edit" data-type="patient" data-id="${p.patient_id}"><i class="bi bi-pencil-fill"></i></button><button class="btn btn-sm btn-outline-danger" data-action="delete" data-type="patient" data-id="${p.patient_id}"><i class="bi bi-trash-fill"></i></button></td></tr>`).join("");
     };
 
     const loadAppointmentsPage = async () => {
-        createPageTemplate({ title: "Branch Appointments", type: "appointment", headers: ["ID", "Date", "Patient", "Doctor", "Status"] });
+        createPageTemplate({ title: "Branch Appointments", type: "appointment", headers: ["ID", "Date", "Patient", "Doctor", "Status"], showAddBtn: false });
         renderSpinner(document.getElementById("table-body"));
         currentViewData = await fetchData("/api/branch-manager/appointments");
         if (!currentViewData) return;
         renderAppointmentsTable(currentViewData);
         setupSearch(renderAppointmentsTable, ['appointment_id', 'patient_name', 'doctor_name', 'status']);
     };
-    
+
     const renderAppointmentsTable = (data) => {
         const tableBody = document.getElementById("table-body");
         if (!data || data.length === 0) { tableBody.innerHTML = '<tr><td colspan="6" class="text-center p-4">No appointments found for this branch.</td></tr>'; return; }
-        const statusColors = { Scheduled: 'primary', Completed: 'success', Cancelled: 'danger', Rescheduled: 'warning' };
-        tableBody.innerHTML = data.map(a => `<tr><td>${a.appointment_id}</td><td>${new Date(a.schedule_date).toLocaleString()}</td><td>${a.patient_name}</td><td>${a.doctor_name}</td><td><span class="badge bg-${statusColors[a.status] || 'secondary'}">${a.status}</span></td><td class="table-actions"><button class="btn btn-sm btn-outline-secondary" data-action="edit" data-type="appointment" data-id="${a.appointment_id}"><i class="bi bi-pencil-fill"></i></button><button class="btn btn-sm btn-outline-danger" data-action="delete" data-type="appointment" data-id="${a.appointment_id}"><i class="bi bi-trash-fill"></i></button></td></tr>`).join("");
+        const statusColors = { Scheduled: 'primary', Completed: 'success', Canceled: 'danger', Rescheduled: 'warning' };
+        tableBody.innerHTML = data.map(a => `<tr><td>${a.appointment_id}</td><td>${new Date(a.schedule_date).toLocaleString()}</td><td>${a.patient_name}</td><td>${a.doctor_name}</td><td><span class="badge bg-${statusColors[a.status] || 'secondary'}">${a.status}</span></td><td class="table-actions"><button class="btn btn-sm btn-outline-danger" data-action="delete" data-type="branch-appointment" data-id="${a.appointment_id}" title="Cancel Appointment"><i class="bi bi-trash-fill"></i></button></td></tr>`).join("");
     };
-    
+
     const loadStaffPage = async () => {
-        createPageTemplate({ title: "Branch Staff", type: "staff", headers: ["ID", "Name", "Role", "Contact"], showAddBtn: false });
+        createPageTemplate({ title: "Branch Staff", type: "staff", headers: ["ID", "Name", "Role", "Contact"], showAddBtn: true });
         renderSpinner(document.getElementById("table-body"));
         currentViewData = await fetchData("/api/branch-manager/staff");
         if (!currentViewData) return;
         renderStaffTable(currentViewData);
         setupSearch(renderStaffTable, ['staff_id', 'name', 'role_name']);
     };
-    
+
     const renderStaffTable = (data) => {
         const tableBody = document.getElementById("table-body");
         if (!data || data.length === 0) { tableBody.innerHTML = '<tr><td colspan="5" class="text-center p-4">No staff found for this branch.</td></tr>'; return; }
@@ -210,64 +244,127 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     const loadInvoicesPage = async () => {
-        createPageTemplate({ title: "Branch Billing", type: "invoice", headers: ["ID", "Patient", "Total", "Status", "Due Date"], showAddBtn: false });
+        createPageTemplate({ title: "Branch Billing", type: "invoice", headers: ["ID", "Patient", "Total", "Due", "Status", "Due Date"], showAddBtn: false });
         renderSpinner(document.getElementById("table-body"));
         currentViewData = await fetchData("/api/branch-manager/invoices");
         if (!currentViewData) return;
         renderInvoicesTable(currentViewData);
         setupSearch(renderInvoicesTable, ['invoice_id', 'patient_name', 'status']);
     };
-    
+
     const renderInvoicesTable = (data) => {
-         const tableBody = document.getElementById("table-body");
-         if (!data || data.length === 0) { tableBody.innerHTML = '<tr><td colspan="6" class="text-center p-4">No invoices found for this branch.</td></tr>'; return; }
-         const statusColors = { Paid: 'success', 'Partially Paid': 'warning', Pending: 'danger' };
-         tableBody.innerHTML = data.map(i => `<tr><td>#${i.invoice_id}</td><td>${i.patient_name}</td><td>$${parseFloat(i.total_amount).toFixed(2)}</td><td><span class="badge bg-${statusColors[i.status] || 'secondary'}">${i.status}</span></td><td>${new Date(i.due_date).toLocaleDateString()}</td><td class="table-actions"><button class="btn btn-sm btn-outline-info" title="View Payments" data-action="view" data-type="payment" data-id="${i.invoice_id}"><i class="bi bi-cash"></i></button></td></tr>`).join("");
+        const tableBody = document.getElementById("table-body");
+        if (!data || data.length === 0) { tableBody.innerHTML = '<tr><td colspan="7" class="text-center p-4">No invoices found for this branch.</td></tr>'; return; }
+        const statusColors = { Paid: 'success', 'Partially Paid': 'warning', Pending: 'danger' };
+        tableBody.innerHTML = data.map(i => {
+            const dueAmount = i.due_amount !== undefined && i.due_amount !== null ? parseFloat(i.due_amount).toFixed(2) : '0.00';
+            return `<tr><td>#${i.invoice_id}</td><td>${i.patient_name}</td><td>$${parseFloat(i.total_amount).toFixed(2)}</td><td>$${dueAmount}</td><td><span class="badge bg-${statusColors[i.status] || 'secondary'}">${i.status}</span></td><td>${new Date(i.due_date).toLocaleDateString()}</td><td class="table-actions">${i.status !== 'Paid' ? `<button class="btn btn-sm btn-outline-success" title="Record Payment" data-action="add" data-type="payment" data-id="${i.invoice_id}"><i class="bi bi-cash-coin"></i></button>` : ''}</td></tr>`;
+        }).join("");
     };
 
-    // --- FORM HANDLERS ---
-    const openPatientForm = async(id = null) => {
+    const loadReportsPage = async () => {
+        mainContent.innerHTML = `
+            <div class="page-header"><h1 class="h3">Branch Reports</h1></div>
+            <div class="alert alert-info" role="alert">
+                <i class="bi bi-info-circle-fill me-2"></i>Reports are generated based on existing data. If a report is empty, it means there is no data matching its criteria (e.g., no paid invoices for the revenue report).
+            </div>
+            <div class="row mt-4">
+                <div class="col-lg-6 mb-4"><div class="card"><div class="card-header">Doctor Revenue (Paid Invoices)</div><div class="card-body" id="doctor-revenue-report"></div></div></div>
+                <div class="col-lg-6 mb-4"><div class="card"><div class="card-header">Patients with Outstanding Balances</div><div class="card-body" id="outstanding-balances-report"></div></div></div>
+            </div>`;
+
+        const revenueContainer = document.getElementById('doctor-revenue-report');
+        const balanceContainer = document.getElementById('outstanding-balances-report');
+        renderSpinner(revenueContainer);
+        renderSpinner(balanceContainer);
+
+        const [revenues, balances] = await Promise.all([
+            fetchData("/api/branch-manager/reports/doctor-revenue"),
+            fetchData("/api/branch-manager/reports/outstanding-balances")
+        ]);
+
+        renderReportTable(revenueContainer, ['Doctor', 'Total Revenue'], revenues, (item) => `<tr><td>${item.doctor_name}</td><td>$${parseFloat(item.total_revenue).toFixed(2)}</td></tr>`, "No revenue data found.");
+        renderReportTable(balanceContainer, ['Patient', 'Invoice ID', 'Outstanding Amount'], balances, (item) => `<tr><td>${item.patient_name}</td><td>#${item.invoice_id}</td><td>$${parseFloat(item.due_amount).toFixed(2)}</td></tr>`, "No outstanding balances found.");
+    };
+
+    const renderReportTable = (container, headers, data, rowRenderer, emptyMessage) => {
+        let content = `<div class="table-responsive"><table class="table table-sm"><thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>`;
+        if (data && data.length > 0) {
+            content += data.map(rowRenderer).join('');
+        } else {
+            content += `<tr><td colspan="${headers.length}" class="text-center p-3 text-muted">${emptyMessage}</td></tr>`;
+        }
+        content += `</tbody></table></div>`;
+        container.innerHTML = content;
+    };
+
+    const openPatientForm = async (id = null) => {
         const isEditing = id !== null;
-        const [patient, providers] = await Promise.all([isEditing ? fetchData(`/api/patients/${id}`) : Promise.resolve({}), fetchData("/api/list/insurance-providers")]);
+        const [patient, providers] = await Promise.all([
+            isEditing ? fetchData(`/api/patients/${id}`) : Promise.resolve({}),
+            fetchData("/api/list/insurance-providers")
+        ]);
+
+        if (providers === null && !patient) return;
+
         formModalLabel.textContent = isEditing ? "Edit Patient" : "Add New Patient";
         formModalBody.innerHTML = `<form id="modal-form">
-            <div class="row"><div class="col-md-6 mb-3"><label class="form-label">Name</label><input type="text" class="form-control" name="name" value="${patient.name || ""}" required></div><div class="col-md-6 mb-3"><label class="form-label">Gender</label><select class="form-select" name="gender"><option value="Male" ${patient.gender === "Male" ? "selected" : ""}>Male</option><option value="Female" ${patient.gender === "Female" ? "selected" : ""}>Female</option></select></div><div class="col-md-6 mb-3"><label class="form-label">Date of Birth</label><input type="date" class="form-control" name="date_of_birth" value="${patient.date_of_birth ? patient.date_of_birth.split("T")[0] : ""}" required></div><div class="col-md-6 mb-3"><label class="form-label">Contact Info</label><input type="text" class="form-control" name="contact_info" value="${patient.contact_info || ""}"></div></div><hr><div class="row"><div class="col-md-6 mb-3"><label class="form-label">Insurance Provider</label><select class="form-select" name="insurance_provider_id"><option value="">None</option>${createOptions(providers,"id","name",patient.insurance_provider_id)}</select></div><div class="col-md-6 mb-3"><label class="form-label">Policy Number</label><input type="text" class="form-control" name="policy_number" value="${patient.policy_number || ""}"></div></div>
+            <div class="row"><div class="col-md-6 mb-3"><label class="form-label">Name</label><input type="text" class="form-control" name="name" value="${patient.name || ""}" required></div><div class="col-md-6 mb-3"><label class="form-label">Gender</label><select class="form-select" name="gender"><option value="Male" ${patient.gender === "Male" ? "selected" : ""}>Male</option><option value="Female" ${patient.gender === "Female" ? "selected" : ""}>Female</option></select></div><div class="col-md-6 mb-3"><label class="form-label">Date of Birth</label><input type="date" class="form-control" name="date_of_birth" value="${patient.date_of_birth ? patient.date_of_birth.split("T")[0] : ""}" required></div><div class="col-md-6 mb-3"><label class="form-label">Contact Info</label><input type="text" class="form-control" name="contact_info" value="${patient.contact_info || ""}"></div></div><hr><div class="row"><div class="col-md-6 mb-3"><label class="form-label">Insurance Provider</label><select class="form-select" name="insurance_provider_id"><option value="">None</option>${createOptions(providers || [], "id", "name", patient.insurance_provider_id)}</select></div><div class="col-md-6 mb-3"><label class="form-label">Policy Number</label><input type="text" class="form-control" name="policy_number" value="${patient.policy_number || ""}"></div></div>
             <div class="modal-footer mt-4"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button><button type="submit" class="btn btn-primary">${isEditing ? "Save Changes" : "Create"}</button></div></form>`;
         formModal.show();
         document.getElementById("modal-form").addEventListener("submit", (e) => { e.preventDefault(); const endpoint = isEditing ? `/api/patients/${id}` : "/api/patients"; submitForm(endpoint, isEditing ? "PUT" : "POST", Object.fromEntries(new FormData(e.target)), loadPatientsPage); });
     };
 
-    const openAppointmentForm = async(id = null) => {
-        const isEditing = id !== null;
-        const [patients, doctors, branches, appointment] = await Promise.all([fetchData("/api/list/patients"), fetchData("/api/list/doctors"), fetchData("/api/list/branches"), isEditing ? fetchData(`/api/appointments/${id}`) : Promise.resolve({})]);
-        formModalLabel.textContent = isEditing ? "Edit Appointment" : "Book Appointment";
-        const scheduleDate = appointment.schedule_date ? new Date(new Date(appointment.schedule_date).getTime() - (new Date().getTimezoneOffset() * 60000)).toISOString().slice(0, 16) : "";
+    const openStaffForm = async () => {
+        const roles = await fetchData("/api/list/roles");
+        if (!roles) return;
+
+        const filteredRoles = roles.filter(r => r.name.toLowerCase() !== 'admin' && r.name.toLowerCase() !== 'branch manager');
+
+        formModalLabel.textContent = "Add New Staff Member";
         formModalBody.innerHTML = `<form id="modal-form">
-            <div class="row"><div class="col-md-6 mb-3"><label class="form-label">Patient</label><select class="form-select" name="patient_id" required>${createOptions(patients,"patient_id","name",appointment.patient_id)}</select></div><div class="col-md-6 mb-3"><label class="form-label">Doctor</label><select class="form-select" name="doctor_id" required>${createOptions(doctors,"doctor_id","name",appointment.doctor_id)}</select></div><div class="col-md-6 mb-3"><label class="form-label">Branch</label><select class="form-select" name="branch_id" required>${createOptions(branches,"branch_id","name",appointment.branch_id)}</select></div><div class="col-md-6 mb-3"><label class="form-label">Date & Time</label><input type="datetime-local" class="form-control" name="schedule_date" value="${scheduleDate}" required></div><div class="col-md-6 mb-3"><label class="form-label">Status</label><select class="form-select" name="status"><option ${appointment.status === "Scheduled" ? "selected" : ""}>Scheduled</option><option ${appointment.status === "Completed" ? "selected" : ""}>Completed</option><option ${appointment.status === "Cancelled" ? "selected" : ""}>Cancelled</option></select></div></div>
-            <div class="modal-footer mt-4"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button><button type="submit" class="btn btn-primary">${isEditing ? "Save Changes" : "Create"}</button></div></form>`;
+            <input type="hidden" name="branch_id" value="${userProfile.branch_id}">
+            <div class="row">
+                <div class="col-md-6 mb-3"><label class="form-label">Full Name</label><input type="text" class="form-control" name="name" required></div>
+                <div class="col-md-6 mb-3"><label class="form-label">Contact Info</label><input type="text" class="form-control" name="contact_info" required></div>
+            </div>
+            <div class="row">
+                <div class="col-md-6 mb-3"><label class="form-label">Role</label><select class="form-select" name="role_id" required>${createOptions(filteredRoles, "role_id", "name")}</select></div>
+                <div class="col-md-6 mb-3"><label class="form-label">Is Medical Staff?</label><select class="form-select" name="is_medical_staff"><option value="1">Yes</option><option value="0" selected>No</option></select></div>
+            </div>
+            <hr>
+            <h5 class="mb-3">Account Credentials</h5>
+            <div class="row">
+                <div class="col-md-4 mb-3"><label class="form-label">Username</label><input type="text" class="form-control" name="username" required></div>
+                <div class="col-md-4 mb-3"><label class="form-label">Email</label><input type="email" class="form-control" name="email"></div>
+                <div class="col-md-4 mb-3"><label class="form-label">Password</label><input type="password" class="form-control" name="password" required></div>
+            </div>
+            <div class="modal-footer mt-4"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button><button type="submit" class="btn btn-primary">Create Staff Member</button></div>
+        </form>`;
         formModal.show();
-        document.getElementById("modal-form").addEventListener("submit", (e) => { e.preventDefault(); const endpoint = isEditing ? `/api/appointments/${id}` : "/api/appointments"; submitForm(endpoint, isEditing ? "PUT" : "POST", Object.fromEntries(new FormData(e.target)), loadAppointmentsPage); });
+        document.getElementById("modal-form").addEventListener("submit", (e) => {
+            e.preventDefault();
+            submitForm("/api/staff", "POST", Object.fromEntries(new FormData(e.target)), loadStaffPage);
+        });
     };
 
-    const viewPayments = async(invoiceId) => {
-        detailsModalLabel.textContent = `Payments for Invoice #${invoiceId}`;
-        detailsModalBody.innerHTML = `<p class="text-center p-4">Loading...</p>`;
-        detailsModal.show();
-        const payments = await fetchData(`/api/payments/by-invoice/${invoiceId}`);
-        let content = `<div class="table-responsive"><table class="table"><thead><tr><th>Date</th><th>Amount</th><th>Method</th></tr></thead><tbody>`;
-        if (payments && payments.length > 0) {
-            content += payments.map(p => `<tr><td>${new Date(p.payment_date).toLocaleString()}</td><td>$${parseFloat(p.paid_amount).toFixed(2)}</td><td>${p.method_of_payment}</td></tr>`).join("");
-        } else {
-            content += `<tr><td colspan="3" class="text-center text-muted p-4">No payments found.</td></tr>`;
-        }
-        content += `</tbody></table></div><hr><h5 class="mb-3">Record New Payment</h5><form id="payment-form"><input type="hidden" name="invoice_id" value="${invoiceId}"><div class="row"><div class="col-md-4 mb-3"><label class="form-label">Amount</label><input type="number" step="0.01" name="paid_amount" class="form-control" required></div><div class="col-md-4 mb-3"><label class="form-label">Method</label><select name="method_of_payment" class="form-select"><option>Cash</option><option>Credit Card</option><option>Bank Transfer</option></select></div><div class="col-md-4 mb-3"><label class="form-label">Date</label><input type="date" name="payment_date" class="form-control" value="${new Date().toISOString().split("T")[0]}" required></div></div><button type="submit" class="btn btn-primary">Record Payment</button></form>`;
-        detailsModalBody.innerHTML = content;
-        document.getElementById("payment-form").addEventListener("submit", (e) => {
+    const openPaymentForm = async (invoiceId) => {
+        formModalLabel.textContent = `Record Payment for Invoice #${invoiceId}`;
+        formModalBody.innerHTML = `<form id="modal-form">
+            <div class="alert alert-info">You are recording a new payment for this invoice.</div>
+            <div class="row">
+                <div class="col-md-4 mb-3"><label class="form-label">Amount</label><input type="number" step="0.01" name="paid_amount" class="form-control" required></div>
+                <div class="col-md-4 mb-3"><label class="form-label">Method</label><select name="method_of_payment" class="form-select"><option>Cash</option><option>Credit Card</option><option>Bank Transfer</option></select></div>
+                <div class="col-md-4 mb-3"><label class="form-label">Date</label><input type="date" name="payment_date" class="form-control" value="${new Date().toISOString().split("T")[0]}" required></div>
+            </div>
+            <div class="modal-footer mt-4"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button><button type="submit" class="btn btn-primary">Record Payment</button></div>
+        </form>`;
+        formModal.show();
+
+        document.getElementById("modal-form").addEventListener("submit", (e) => {
             e.preventDefault();
-            submitForm("/api/payments", "POST", Object.fromEntries(new FormData(e.target)), () => {
-                detailsModal.hide();
-                loadInvoicesPage();
-            });
+            const endpoint = `/api/branch-manager/invoices/${invoiceId}/payments`;
+            submitForm(endpoint, "POST", Object.fromEntries(new FormData(e.target)), loadInvoicesPage);
         });
     };
 
@@ -277,7 +374,8 @@ document.addEventListener("DOMContentLoaded", () => {
         patients: loadPatientsPage,
         appointments: loadAppointmentsPage,
         staff: loadStaffPage,
-        invoices: loadInvoicesPage
+        invoices: loadInvoicesPage,
+        reports: loadReportsPage
     };
 
     const navigateTo = (page) => {
@@ -300,28 +398,34 @@ document.addEventListener("DOMContentLoaded", () => {
         const { action, type, id } = target.dataset;
         const entityMap = {
             patient: { refresh: loadPatientsPage, endpoint: 'patients', name: 'patient', handler: openPatientForm },
-            appointment: { refresh: loadAppointmentsPage, endpoint: 'appointments', name: 'appointment', handler: openAppointmentForm },
-            payment: { handler: viewPayments }
+            staff: { refresh: loadStaffPage, endpoint: 'staff', name: 'staff member', handler: openStaffForm },
+            appointment: { refresh: loadAppointmentsPage, endpoint: 'branch-manager/appointments', name: 'appointment' },
+            'branch-appointment': { refresh: loadAppointmentsPage, endpoint: 'branch-manager/appointments', name: 'appointment' },
+            payment: { handler: openPaymentForm }
         };
         const entity = entityMap[type];
         if (!entity) return;
-        if ((action === "add" || action === "edit" || action === "view") && entity.handler) {
+
+        if (action === "add" && entity.handler) {
+            entity.handler(id || null);
+        } else if (action === "edit" && entity.handler) {
             entity.handler(id);
         } else if (action === "delete" && entity.endpoint) {
             deleteItem(`/api/${entity.endpoint}/${id}`, entity.name, entity.refresh);
         }
     });
-    
+
     document.getElementById("logout-btn").addEventListener("click", () => {
         localStorage.removeItem('clinicProToken');
         localStorage.removeItem('clinicProRole');
         window.location.href = 'login.html';
     });
-    
+
     // Initial Load
     const initializeDashboard = async () => {
         const profile = await fetchData("/api/branch-manager/profile");
         if (profile) {
+            userProfile = profile;
             document.getElementById('welcome-message').textContent = `Welcome, ${profile.staff_name}!`;
             document.getElementById('branch-info').textContent = `Managing: ${profile.branch_name}`;
             navigateTo("dashboard");
