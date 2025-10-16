@@ -5,6 +5,11 @@ const API_BASE_URL = "http://localhost:3000";
 
 document.addEventListener("DOMContentLoaded", () => {
     // --- ELEMENT SELECTION ---
+    const token = localStorage.getItem('clinicProToken');
+    if (!token) {
+        window.location.href = 'login.html';
+        return; // Stop executing the rest of the script
+    }
     const mainContent = document.getElementById("main-content");
     const navLinks = document.querySelectorAll(".nav-link");
     const toastContainer = document.querySelector(".toast-container");
@@ -36,52 +41,80 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     const fetchData = async(endpoint) => {
-        try {
-            const response = await fetch(`${API_BASE_URL}${endpoint}`);
-            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-            return await response.json();
-        } catch (error) {
-            console.error("Fetch error:", error);
-            mainContent.innerHTML = `<div class="alert alert-danger">Failed to load data. Is the server running?</div>`;
-            return null;
+    try {
+        const token = localStorage.getItem('clinicProToken'); // <-- Use the correct key
+        const headers = {};
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+        } else {
+            // If no token, redirect to login page
+            window.location.href = 'login.html'; 
+            return;
         }
-    };
+
+        const response = await fetch(`${API_BASE_URL}${endpoint}`, { headers });
+        if (response.status === 401) { // Specifically handle unauthorized errors
+             window.location.href = 'login.html';
+             return;
+        }
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        return await response.json();
+    } catch (error) {
+        console.error("Fetch error:", error);
+        mainContent.innerHTML = `<div class="alert alert-danger">Failed to load data. Please try logging in again.</div>`;
+        return null;
+    }
+};
 
     const submitForm = async(endpoint, method, data, callback) => {
-        try {
-            const filteredData = Object.fromEntries(Object.entries(data).filter(([_, v]) => v != null && v !== ''));
-            const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-                method,
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(filteredData),
-            });
-            if (!response.ok) {
-                const err = await response.json();
-                throw new Error(err.error || "Form submission failed");
-            }
-            formModal.hide();
-            callback();
-            showToast(`Record has been ${method === "POST" ? "created" : "updated"} successfully.`);
-        } catch (error) {
-            console.error("Submit error:", error);
-            showToast(`An error occurred: ${error.message}`, 'danger');
+    try {
+        const token = localStorage.getItem('clinicProToken'); // <-- Use the correct key
+        const headers = { "Content-Type": "application/json" };
+        if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
         }
-    };
+        
+        // ... rest of the function is the same
+        const filteredData = Object.fromEntries(Object.entries(data).filter(([_, v]) => v != null && v !== ''));
+        const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+            method,
+            headers, // Pass the updated headers
+            body: JSON.stringify(filteredData),
+        });
+        // ... rest of the function
+        if (!response.ok) {
+    const err = await response.json();
+    // MODIFICATION HERE: Look for .error OR .message
+    throw new Error(err.error || err.message || "Form submission failed");
+}
+        formModal.hide();
+        callback();
+        showToast(`Record has been ${method === "POST" ? "created" : "updated"} successfully.`);
+    } catch (error) {
+        console.error("Submit error:", error);
+        showToast(`An error occurred: ${error.message}`, 'danger');
+    }
+};
 
     const deleteItem = async(endpoint, typeName, refreshCallback) => {
-        if (confirm(`Are you sure you want to delete this ${typeName}?`)) {
-            try {
-                const response = await fetch(`${API_BASE_URL}${endpoint}`, { method: "DELETE" });
-                if (!response.ok) throw new Error("Deletion failed");
-                refreshCallback();
-                showToast(`${typeName.charAt(0).toUpperCase() + typeName.slice(1)} deleted successfully.`);
-            } catch (error)
-             {
-                console.error("Delete error:", error);
-                showToast("Could not delete record. It might be in use.", 'danger');
+    if (confirm(`Are you sure you want to delete this ${typeName}?`)) {
+        try {
+            const token = localStorage.getItem('clinicProToken'); // <-- Use the correct key
+            const headers = {};
+            if (token) {
+                headers['Authorization'] = `Bearer ${token}`;
             }
+
+            const response = await fetch(`${API_BASE_URL}${endpoint}`, { method: "DELETE", headers });
+            if (!response.ok) throw new Error("Deletion failed");
+            refreshCallback();
+            showToast(`${typeName.charAt(0).toUpperCase() + typeName.slice(1)} deleted successfully.`);
+        } catch (error) {
+            console.error("Delete error:", error);
+            showToast("Could not delete record. It might be in use.", 'danger');
         }
-    };
+    }
+};
 
     const createOptions = (items, valueField, textField, selectedValue) =>
         items.map((item) => `<option value="${item[valueField]}" ${item[valueField] == selectedValue ? "selected" : ""}>${item[textField]}</option>`).join("");
@@ -365,13 +398,117 @@ document.addEventListener("DOMContentLoaded", () => {
         document.getElementById("modal-form").addEventListener("submit", (e) => { e.preventDefault(); const endpoint = isEditing ? `/api/appointments/${id}` : "/api/appointments"; submitForm(endpoint, isEditing ? "PUT" : "POST", Object.fromEntries(new FormData(e.target)), loadAppointmentsPage); });
     };
 
+    // app.js
+
     const openBranchForm = async(id = null) => {
         const isEditing = id !== null;
-        const data = isEditing ? await fetchData(`/api/branches/${id}`) : {};
-        formModalLabel.textContent = isEditing ? "Edit Branch" : "Add Branch";
-        formModalBody.innerHTML = `<form id="modal-form"><div class="mb-3"><label class="form-label">Name</label><input type="text" class="form-control" name="name" value="${data.name || ''}" required></div><div class="mb-3"><label class="form-label">Address</label><input type="text" class="form-control" name="address" value="${data.address || ''}"></div><div class="mb-3"><label class="form-label">Contact Number</label><input type="text" class="form-control" name="contact_number" value="${data.contact_number || ''}"></div><div class="modal-footer mt-4"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button><button type="submit" class="btn btn-primary">Save</button></div></form>`;
+
+        if (isEditing) {
+            // For editing, fetch branch details and the list of potential managers
+            const [data, managers] = await Promise.all([
+                fetchData(`/api/branches/${id}`),
+                fetchData(`/api/staff/managers`) // <-- New API call
+            ]);
+
+            if (!data || !managers) {
+                showToast("Could not load data for the branch form.", 'danger');
+                return;
+            }
+
+            formModalLabel.textContent = "Edit Branch";
+            // Form now includes a dropdown to change the manager
+            formModalBody.innerHTML = `<form id="modal-form">
+                <div class="mb-3">
+                    <label class="form-label">Name</label>
+                    <input type="text" class="form-control" name="name" value="${data.name || ''}" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Address</label>
+                    <input type="text" class="form-control" name="address" value="${data.address || ''}">
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Contact Number</label>
+                    <input type="text" class="form-control" name="contact_number" value="${data.contact_number || ''}">
+                </div>
+                <hr class="my-4">
+                <div class="mb-3">
+                    <label class="form-label">Branch Manager</label>
+                    <select class="form-select" name="manager_user_id">
+                        <option value="">No Manager Assigned</option>
+                        ${createOptions(managers, "user_id", "name", data.manager_user_id)}
+                    </select>
+                    <div class="form-text">Select an existing staff member with the 'Branch Manager' role.</div>
+                </div>
+                <div class="modal-footer mt-4">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="submit" class="btn btn-primary">Save Changes</button>
+                </div>
+            </form>`;
+            formModal.show();
+            document.getElementById("modal-form").addEventListener("submit", (e) => {
+                e.preventDefault();
+                submitForm(`/api/branches/${id}`, "PUT", Object.fromEntries(new FormData(e.target)), loadBranchesPage);
+            });
+            return;
+        }
+
+        // --- Logic for creating a NEW branch remains the same ---
+        formModalLabel.textContent = "Add New Branch";
+        formModalBody.innerHTML = `<form id="modal-form">
+            <h5>Branch Details</h5>
+            <div class="row">
+                <div class="col-md-12 mb-3">
+                    <label class="form-label">Branch Name</label>
+                    <input type="text" class="form-control" name="name" required>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Branch Address</label>
+                    <input type="text" class="form-control" name="address">
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Branch Contact Number</label>
+                    <input type="text" class="form-control" name="contact_number">
+                </div>
+            </div>
+            
+            <hr class="my-4">
+            
+            <h5>Branch Manager Details</h5>
+            <p class="text-muted small">This will create a new staff account for the manager.</p>
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Manager Full Name</label>
+                    <input type="text" class="form-control" name="manager_name" required>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Manager Contact Info</label>
+                    <input type="text" class="form-control" name="manager_contact_info" required>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Manager Username</label>
+                    <input type="text" class="form-control" name="manager_username" required>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Manager Account Email</label>
+                    <input type="email" class="form-control" name="manager_email" required>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Manager Password</label>
+                    <input type="password" class="form-control" name="manager_password" required>
+                </div>
+            </div>
+
+            <div class="modal-footer mt-4">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                <button type="submit" class="btn btn-primary">Create Branch & Manager</button>
+            </div>
+        </form>`;
+
         formModal.show();
-        document.getElementById("modal-form").addEventListener("submit", (e) => { e.preventDefault(); const endpoint = isEditing ? `/api/branches/${id}` : "/api/branches"; submitForm(endpoint, isEditing ? "PUT" : "POST", Object.fromEntries(new FormData(e.target)), loadBranchesPage); });
+        document.getElementById("modal-form").addEventListener("submit", (e) => {
+            e.preventDefault();
+            submitForm("/api/branches", "POST", Object.fromEntries(new FormData(e.target)), loadBranchesPage);
+        });
     };
 
     const openProviderForm = async(id = null) => {
@@ -409,25 +546,68 @@ document.addEventListener("DOMContentLoaded", () => {
         document.getElementById("modal-form").addEventListener("submit", (e) => { e.preventDefault(); const endpoint = isEditing ? `/api/specialties/${id}` : "/api/specialties"; submitForm(endpoint, isEditing ? "PUT" : "POST", Object.fromEntries(new FormData(e.target)), loadSpecialtiesPage); });
     };
 
-    const openStaffForm = async(id = null) => {
-        if (id) { showToast('Editing staff is not supported in this demo.', 'warning'); return; }
-        const [roles, branches] = await Promise.all([fetchData("/api/list/roles"), fetchData("/api/list/branches")]);
-        formModalLabel.textContent = "Add New Staff";
-        formModalBody.innerHTML = `<form id="modal-form">
-            <div class="row">
-                <div class="col-md-6 mb-3"><label class="form-label">Full Name</label><input type="text" name="name" class="form-control" required></div>
-                <div class="col-md-6 mb-3"><label class="form-label">Contact Info</label><input type="text" name="contact_info" class="form-control" required></div>
-                <div class="col-md-6 mb-3"><label class="form-label">Username</label><input type="text" name="username" class="form-control" required></div>
-                <div class="col-md-6 mb-3"><label class="form-label">Account Email</label><input type="email" name="email" class="form-control" required></div>
-                <div class="col-md-6 mb-3"><label class="form-label">Role</label><select name="role_id" class="form-select">${createOptions(roles, "role_id", "name")}</select></div>
-                <div class="col-md-6 mb-3"><label class="form-label">Branch</label><select name="branch_id" class="form-select">${createOptions(branches, "branch_id", "name")}</select></div>
+    // app.js
+
+// app.js
+
+const openStaffForm = async (id = null) => {
+    if (id) {
+        showToast('Editing staff is not supported in this demo.', 'warning');
+        return;
+    }
+
+    // 1. Fetch specialties along with roles and branches
+    const [roles, branches, specialties] = await Promise.all([
+        fetchData("/api/list/roles"),
+        fetchData("/api/list/branches"),
+        fetchData("/api/list/specialties") // <-- Fetch the list of specialties
+    ]);
+
+    if (!roles || !branches || !specialties) {
+        showToast('Could not load necessary data for the form.', 'danger');
+        return;
+    }
+
+    formModalLabel.textContent = "Add New Staff";
+    formModalBody.innerHTML = `<form id="modal-form">
+        <div class="row">
+            <div class="col-md-6 mb-3"><label class="form-label">Full Name</label><input type="text" name="name" class="form-control" required></div>
+            <div class="col-md-6 mb-3"><label class="form-label">Contact Info</label><input type="text" name="contact_info" class="form-control" required></div>
+            <div class="col-md-6 mb-3"><label class="form-label">Username</label><input type="text" name="username" class="form-control" required></div>
+            <div class="col-md-6 mb-3"><label class="form-label">Account Email</label><input type="email" name="email" class="form-control" required></div>
+            <div class="col-md-6 mb-3"><label class="form-label">Password</label><input type="password" name="password" class="form-control" required></div>
+            <div class="col-md-6 mb-3"><label class="form-label">Role</label><select name="role_id" class="form-select" required>${createOptions(roles, "role_id", "name")}</select></div>
+            <div class="col-md-6 mb-3"><label class="form-label">Branch</label><select name="branch_id" class="form-select" required>${createOptions(branches, "branch_id", "name")}</select></div>
+
+            <div class="col-md-6 mb-3 d-none" id="specialty-container">
+                <label class="form-label">Specialty</label>
+                <select name="specialty_id" class="form-select">${createOptions(specialties, "specialty_id", "name")}</select>
             </div>
-            <div class="mb-3 form-check"><input type="checkbox" name="is_medical_staff" class="form-check-input" value="1"><label class="form-check-label">Is Medical Staff</label></div>
-            <div class="modal-footer mt-4"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button><button type="submit" class="btn btn-primary">Create Staff</button></div>
-        </form>`;
-        formModal.show();
-        document.getElementById("modal-form").addEventListener("submit", (e) => { e.preventDefault(); submitForm("/api/staff", "POST", Object.fromEntries(new FormData(e.target)), loadStaffPage); });
-    };
+        </div>
+        <div class="mb-3 form-check"><input type="checkbox" name="is_medical_staff" class="form-check-input" value="1"><label class="form-check-label">Is Medical Staff</label></div>
+        <div class="modal-footer mt-4"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button><button type="submit" class="btn btn-primary">Create Staff</button></div>
+    </form>`;
+
+    formModal.show();
+
+    // 3. Add logic to show/hide the specialty field based on the selected role
+    const roleSelect = formModalBody.querySelector('[name="role_id"]');
+    const specialtyContainer = formModalBody.querySelector('#specialty-container');
+
+    roleSelect.addEventListener('change', (e) => {
+        const selectedRoleText = e.target.selectedOptions[0].text;
+        if (selectedRoleText === 'Doctor') {
+            specialtyContainer.classList.remove('d-none'); // Show the specialty dropdown
+        } else {
+            specialtyContainer.classList.add('d-none'); // Hide it for other roles
+        }
+    });
+
+    document.getElementById("modal-form").addEventListener("submit", (e) => {
+        e.preventDefault();
+        submitForm("/api/staff", "POST", Object.fromEntries(new FormData(e.target)), loadStaffPage);
+    });
+};
 
     const viewPayments = async(invoiceId) => {
         detailsModalLabel.textContent = `Payments for Invoice #${invoiceId}`;
