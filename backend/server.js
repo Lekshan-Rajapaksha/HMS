@@ -17,7 +17,7 @@ const JWT_SECRET = 'your-super-secret-and-long-key-for-security';
 const dbConfig = {
     host: "localhost",
     user: "root",
-    password: "Sahansql", // Replace with your MySQL password
+    password: "Lekshan123@", // Replace with your MySQL password
     database: "hospital_managment", // Replace with your database name
     waitForConnections: true,
     connectionLimit: 10,
@@ -307,20 +307,7 @@ app.delete("/api/patients/:id", authorize(['admin']), async (req, res) => {
 // Appointments
 app.get("/api/appointments", authorize(['admin', 'receptionist']), async (req, res) => {
     try {
-        const [rows] = await pool.query(`
-            SELECT a.*, 
-                   p.name as patient_name, 
-                   s.name as doctor_name, 
-                   b.name as branch_name,
-                   cancelled_staff.name as cancelled_by_name
-            FROM Appointment a 
-            JOIN Patient p ON a.patient_id = p.patient_id 
-            JOIN Doctor d ON a.doctor_id = d.doctor_id 
-            JOIN Staff s ON d.staff_id = s.staff_id 
-            JOIN Branch b ON a.branch_id = b.branch_id 
-            LEFT JOIN Staff cancelled_staff ON a.cancelled_by_staff_id = cancelled_staff.staff_id
-            ORDER BY a.schedule_date DESC
-        `);
+        const [rows] = await pool.query(`SELECT a.*, p.name as patient_name, s.name as doctor_name, b.name as branch_name FROM Appointment a JOIN Patient p ON a.patient_id = p.patient_id JOIN Doctor d ON a.doctor_id = d.doctor_id JOIN Staff s ON d.staff_id = s.staff_id JOIN Branch b ON a.branch_id = b.branch_id ORDER BY a.schedule_date DESC`);
         res.json(rows);
     } catch (err) { handleDatabaseError(res, err); }
 });
@@ -444,30 +431,8 @@ app.put("/api/appointments/:id", authorize(['admin', 'receptionist']), async (re
         const requestBody = req.body;
         const { userId } = req.user;
 
-        // Check if this is a cancellation
-        if (requestBody.status === 'Cancelled') {
-            const [[staffMember]] = await connection.query('SELECT staff_id FROM Staff WHERE user_id = ?', [userId]);
-            
-            if (!staffMember) {
-                throw new Error("Could not find staff member details.");
-            }
-
-            // Update appointment with cancellation details
-            await connection.query(
-                `UPDATE Appointment 
-                SET status = 'Cancelled', 
-                    cancellation_reason = ?, 
-                    cancelled_by_staff_id = ?, 
-                    cancelled_date = NOW() 
-                WHERE appointment_id = ?`,
-                [requestBody.cancellation_reason || null, staffMember.staff_id, appointmentId]
-            );
-
-            await connection.commit();
-            res.status(200).json({ message: 'Appointment cancelled successfully' });
-
-        // Check if this is a reschedule
-        } else if (requestBody.status === 'Rescheduled' && requestBody.schedule_date) {
+        // Check if this is a reschedule or a general update
+        if (requestBody.status === 'Rescheduled' && requestBody.schedule_date) {
             const newDate = new Date(requestBody.schedule_date).toISOString().slice(0, 19).replace('T', ' ');
             
             const [[staffMember]] = await connection.query('SELECT staff_id FROM Staff WHERE user_id = ?', [userId]);

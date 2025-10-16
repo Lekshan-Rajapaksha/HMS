@@ -286,17 +286,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
         tableBody.innerHTML = data.map(a => `
             <tr>
-                <td>
-                    ${a.appointment_id}
-                    ${a.is_walk_in ? '<span class="badge bg-warning text-dark ms-1" title="Emergency Walk-in"><i class="bi bi-exclamation-triangle-fill"></i> Walk-in</span>' : ''}
-                </td>
+                <td>${a.appointment_id}</td>
                 <td>${new Date(a.schedule_date).toLocaleString("en-SG")}</td>
                 <td>${a.patient_name}</td>
                 <td>${a.doctor_name}</td>
-                <td>
-                    <span class="badge bg-${statusColors[a.status] || 'secondary'}">${a.status}</span>
-                    ${a.status === 'Cancelled' && a.cancellation_reason ? `<br><small class="text-muted" title="Cancelled by: ${a.cancelled_by_name || 'Unknown'}">Reason: ${a.cancellation_reason.substring(0, 50)}${a.cancellation_reason.length > 50 ? '...' : ''}</small>` : ''}
-                </td>
+                <td><span class="badge bg-${statusColors[a.status] || 'secondary'}">${a.status}</span></td>
                 <td class="table-actions">
                     ${a.status === 'Scheduled' || a.status === 'Rescheduled' ? `
                     <button class="btn btn-sm btn-outline-primary" data-action="reschedule" data-type="appointment" data-id="${a.appointment_id}" title="Reschedule">
@@ -459,7 +453,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 </div>
                  <div class="col-md-6 mb-3">
                     <label class="form-label">Status</label>
-                    <select class="form-select" name="status" id="appointment-status">
+                    <select class="form-select" name="status">
                         <option ${appointment.status === "Scheduled" ? "selected" : ""}>Scheduled</option>
                         <option ${appointment.status === "Completed" ? "selected" : ""}>Completed</option>
                         <option ${appointment.status === "Cancelled" ? "selected" : ""}>Cancelled</option>
@@ -479,23 +473,6 @@ document.addEventListener("DOMContentLoaded", () => {
                     </select>
                 </div>
             </div>
-            <div class="row">
-                <div class="col-md-6 mb-3">
-                    <div class="form-check">
-                        <input class="form-check-input" type="checkbox" name="is_walk_in" id="is-walk-in" value="1" ${appointment.is_walk_in ? "checked" : ""}>
-                        <label class="form-check-label" for="is-walk-in">
-                            <strong>Emergency Walk-in</strong>
-                            <small class="text-muted d-block">Check if this is an unscheduled emergency appointment</small>
-                        </label>
-                    </div>
-                </div>
-            </div>
-            <div class="row" id="cancellation-reason-container" style="display: ${appointment.status === 'Cancelled' ? 'block' : 'none'};">
-                <div class="col-12 mb-3">
-                    <label class="form-label">Cancellation Reason</label>
-                    <textarea class="form-control" name="cancellation_reason" id="cancellation-reason" rows="3" placeholder="Enter reason for cancellation...">${appointment.cancellation_reason || ''}</textarea>
-                </div>
-            </div>
             <div class="modal-footer mt-4">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
                 <button type="submit" class="btn btn-primary">${isEditing ? "Save Changes" : "Create"}</button>
@@ -505,17 +482,6 @@ document.addEventListener("DOMContentLoaded", () => {
         formModal.show();
         const doctorSelect = document.getElementById("appointment-doctor");
         const dateInput = document.getElementById("appointment-date");
-        const statusSelect = document.getElementById("appointment-status");
-        const cancellationContainer = document.getElementById("cancellation-reason-container");
-
-        // Show/hide cancellation reason based on status
-        statusSelect.addEventListener("change", () => {
-            if (statusSelect.value === "Cancelled") {
-                cancellationContainer.style.display = "block";
-            } else {
-                cancellationContainer.style.display = "none";
-            }
-        });
 
         const fetchAndRenderTimes = () => {
             const doctorId = doctorSelect.value;
