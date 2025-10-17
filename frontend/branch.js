@@ -21,8 +21,19 @@ document.addEventListener("DOMContentLoaded", () => {
     const detailsModalBody = document.getElementById("detailsModalBody");
 
     let currentViewData = []; // Store data for the current view for filtering
+    let userProfile = {}; // Declare userProfile in the main scope
 
     // --- GENERIC HELPER FUNCTIONS ---
+
+    const formatDate = (dateString) => {
+        if (!dateString) return 'N/A';
+        const date = new Date(dateString);
+        const day = String(date.getDate()).padStart(2, '0');
+        const month = String(date.getMonth() + 1).padStart(2, '0'); // Months are zero-based
+        const year = date.getFullYear();
+        return `${day}/${month}/${year}`;
+    };
+
     const showToast = (message, type = 'success') => {
         const toastId = 'toast-' + Math.random().toString(36).substring(2, 9);
         const icon = type === 'success' ? 'check-circle-fill' : 'exclamation-triangle-fill';
@@ -225,7 +236,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const tableBody = document.getElementById("table-body");
         if (!data || data.length === 0) { tableBody.innerHTML = '<tr><td colspan="6" class="text-center p-4">No appointments found for this branch.</td></tr>'; return; }
         const statusColors = { Scheduled: 'primary', Completed: 'success', Canceled: 'danger', Rescheduled: 'warning' };
-        tableBody.innerHTML = data.map(a => `<tr><td>${a.appointment_id}</td><td>${new Date(a.schedule_date).toLocaleString()}</td><td>${a.patient_name}</td><td>${a.doctor_name}</td><td><span class="badge bg-${statusColors[a.status] || 'secondary'}">${a.status}</span></td><td class="table-actions"><button class="btn btn-sm btn-outline-danger" data-action="delete" data-type="branch-appointment" data-id="${a.appointment_id}" title="Cancel Appointment"><i class="bi bi-trash-fill"></i></button></td></tr>`).join("");
+        tableBody.innerHTML = data.map(a => `<tr><td>${a.appointment_id}</td><td>${formatDate(a.schedule_date)}</td><td>${a.patient_name}</td><td>${a.doctor_name}</td><td><span class="badge bg-${statusColors[a.status] || 'secondary'}">${a.status}</span></td><td class="table-actions"><button class="btn btn-sm btn-outline-danger" data-action="delete" data-type="branch-appointment" data-id="${a.appointment_id}" title="Cancel Appointment"><i class="bi bi-trash-fill"></i></button></td></tr>`).join("");
     };
 
     const loadStaffPage = async () => {
@@ -240,7 +251,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const renderStaffTable = (data) => {
         const tableBody = document.getElementById("table-body");
         if (!data || data.length === 0) { tableBody.innerHTML = '<tr><td colspan="5" class="text-center p-4">No staff found for this branch.</td></tr>'; return; }
-        tableBody.innerHTML = data.map(s => `<tr><td>${s.staff_id}</td><td>${s.name} ${s.is_medical_staff ? '<i class="bi bi-heart-pulse text-primary" title="Medical Staff"></i>' : ""}</td><td>${s.role_name}</td><td>${s.contact_info}</td><td class="table-actions"><button class="btn btn-sm btn-outline-secondary" disabled title="Contact Admin to Edit"><i class="bi bi-pencil-fill"></i></button></td></tr>`).join("");
+        tableBody.innerHTML = data.map(s => `<tr><td>${s.staff_id}</td><td>${s.name} ${s.is_medical_staff ? '<i class="bi bi-heart-pulse text-primary" title="Medical Staff"></i>' : ""}</td><td>${s.role_name}</td><td>${s.contact_info}</td><td class="table-actions"><button class="btn btn-sm btn-outline-secondary" data-action="edit" data-type="staff-edit" data-id="${s.staff_id}"><i class="bi bi-pencil-fill"></i></button></td></tr>`).join("");
     };
 
     const loadInvoicesPage = async () => {
@@ -258,41 +269,76 @@ document.addEventListener("DOMContentLoaded", () => {
         const statusColors = { Paid: 'success', 'Partially Paid': 'warning', Pending: 'danger' };
         tableBody.innerHTML = data.map(i => {
             const dueAmount = i.due_amount !== undefined && i.due_amount !== null ? parseFloat(i.due_amount).toFixed(2) : '0.00';
-            return `<tr><td>#${i.invoice_id}</td><td>${i.patient_name}</td><td>$${parseFloat(i.total_amount).toFixed(2)}</td><td>$${dueAmount}</td><td><span class="badge bg-${statusColors[i.status] || 'secondary'}">${i.status}</span></td><td>${new Date(i.due_date).toLocaleDateString()}</td><td class="table-actions">${i.status !== 'Paid' ? `<button class="btn btn-sm btn-outline-success" title="Record Payment" data-action="add" data-type="payment" data-id="${i.invoice_id}"><i class="bi bi-cash-coin"></i></button>` : ''}</td></tr>`;
+            return `<tr><td>#${i.invoice_id}</td><td>${i.patient_name}</td><td>$${parseFloat(i.total_amount).toFixed(2)}</td><td>$${dueAmount}</td><td><span class="badge bg-${statusColors[i.status] || 'secondary'}">${i.status}</span></td><td>${formatDate(i.due_date)}</td><td class="table-actions">${i.status !== 'Paid' ? `<button class="btn btn-sm btn-outline-success" title="Record Payment" data-action="add" data-type="payment" data-id="${i.invoice_id}"><i class="bi bi-cash-coin"></i></button>` : ''}</td></tr>`;
         }).join("");
     };
 
-    const loadReportsPage = async () => {
+    // branch.js
+
+    const loadReportsLandingPage = () => {
         mainContent.innerHTML = `
-            <div class="page-header"><h1 class="h3">Branch Reports</h1></div>
+            <div class="page-header">
+                <h1 class="h3">Branch Reports</h1>
+            </div>
             <div class="alert alert-info" role="alert">
-                <i class="bi bi-info-circle-fill me-2"></i>Reports are generated based on existing data. If a report is empty, it means there is no data matching its criteria (e.g., no paid invoices for the revenue report).
+                <i class="bi bi-info-circle-fill me-2"></i>Select a report category to view the details.
             </div>
             <div class="row mt-4">
-                <div class="col-lg-6 mb-4"><div class="card"><div class="card-header">Doctor Revenue (Paid Invoices)</div><div class="card-body" id="doctor-revenue-report"></div></div></div>
-                <div class="col-lg-6 mb-4"><div class="card"><div class="card-header">Patients with Outstanding Balances</div><div class="card-body" id="outstanding-balances-report"></div></div></div>
+                <div class="col-md-6 mb-4">
+                    <div class="card report-card" data-action="view" data-type="doctor-revenue-report" style="cursor: pointer;">
+                        <div class="card-body text-center p-4">
+                            <i class="bi bi-person-hearts fs-1 text-primary mb-3"></i>
+                            <h5 class="card-title">Doctor Reports</h5>
+                            <p class="card-text text-muted">View revenue generated by each doctor.</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6 mb-4">
+                    <div class="card report-card" data-action="view" data-type="outstanding-balances-report" style="cursor: pointer;">
+                        <div class="card-body text-center p-4">
+                            <i class="bi bi-cash-stack fs-1 text-danger mb-3"></i>
+                            <h5 class="card-title">Outstanding Payments</h5>
+                            <p class="card-text text-muted">See all patients with outstanding balances.</p>
+                        </div>
+                    </div>
+                </div>
             </div>`;
+    };
 
-        const revenueContainer = document.getElementById('doctor-revenue-report');
-        const balanceContainer = document.getElementById('outstanding-balances-report');
-        renderSpinner(revenueContainer);
-        renderSpinner(balanceContainer);
+    const loadDoctorRevenueReport = async () => {
+        mainContent.innerHTML = `
+            <div class="page-header">
+                 <h1 class="h3">Doctor Revenue Report</h1>
+                 <button class="btn btn-outline-secondary" data-action="back" data-type="reports-landing"><i class="bi bi-arrow-left me-2"></i>Back to Reports</button>
+            </div>
+            <div class="card"><div class="card-body" id="report-container"></div></div>`;
 
-        const [revenues, balances] = await Promise.all([
-            fetchData("/api/branch-manager/reports/doctor-revenue"),
-            fetchData("/api/branch-manager/reports/outstanding-balances")
-        ]);
+        const container = document.getElementById('report-container');
+        renderSpinner(container);
+        const revenues = await fetchData("/api/branch-manager/reports/doctor-revenue");
+        renderReportTable(container, ['Doctor', 'Total Revenue (from Paid Invoices)'], revenues, (item) => `<tr><td>${item.doctor_name}</td><td>$${parseFloat(item.total_revenue).toFixed(2)}</td></tr>`, "No paid invoice data found for any doctor.");
+    };
 
-        renderReportTable(revenueContainer, ['Doctor', 'Total Revenue'], revenues, (item) => `<tr><td>${item.doctor_name}</td><td>$${parseFloat(item.total_revenue).toFixed(2)}</td></tr>`, "No revenue data found.");
-        renderReportTable(balanceContainer, ['Patient', 'Invoice ID', 'Outstanding Amount'], balances, (item) => `<tr><td>${item.patient_name}</td><td>#${item.invoice_id}</td><td>$${parseFloat(item.due_amount).toFixed(2)}</td></tr>`, "No outstanding balances found.");
+    const loadOutstandingBalancesReport = async () => {
+        mainContent.innerHTML = `
+            <div class="page-header">
+                 <h1 class="h3">Outstanding Balances Report</h1>
+                 <button class="btn btn-outline-secondary" data-action="back" data-type="reports-landing"><i class="bi bi-arrow-left me-2"></i>Back to Reports</button>
+            </div>
+            <div class="card"><div class="card-body" id="report-container"></div></div>`;
+
+        const container = document.getElementById('report-container');
+        renderSpinner(container);
+        const balances = await fetchData("/api/branch-manager/reports/outstanding-balances");
+        renderReportTable(container, ['Patient', 'Invoice ID', 'Outstanding Amount'], balances, (item) => `<tr><td>${item.patient_name}</td><td>#${item.invoice_id}</td><td>$${parseFloat(item.due_amount).toFixed(2)}</td></tr>`, "No outstanding balances found.");
     };
 
     const renderReportTable = (container, headers, data, rowRenderer, emptyMessage) => {
-        let content = `<div class="table-responsive"><table class="table table-sm"><thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>`;
+        let content = `<div class="table-responsive"><table class="table table-hover"><thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>`;
         if (data && data.length > 0) {
             content += data.map(rowRenderer).join('');
         } else {
-            content += `<tr><td colspan="${headers.length}" class="text-center p-3 text-muted">${emptyMessage}</td></tr>`;
+            content += `<tr><td colspan="${headers.length}" class="text-center p-4 text-muted">${emptyMessage}</td></tr>`;
         }
         content += `</tbody></table></div>`;
         container.innerHTML = content;
@@ -347,7 +393,43 @@ document.addEventListener("DOMContentLoaded", () => {
             submitForm("/api/staff", "POST", Object.fromEntries(new FormData(e.target)), loadStaffPage);
         });
     };
+    const openStaffEditForm = async (id) => {
+        const staff = await fetchData(`/api/branch-manager/staff/${id}`);
+        if (!staff) return;
 
+        formModalLabel.textContent = `Edit Staff: ${staff.name}`;
+        formModalBody.innerHTML = `<form id="modal-form">
+            <div class="alert alert-secondary">
+                Role and credentials cannot be changed from this panel. Contact an Administrator for assistance.
+            </div>
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Full Name</label>
+                    <input type="text" class="form-control" name="name" value="${staff.name || ''}" required>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Contact Info</label>
+                    <input type="text" class="form-control" name="contact_info" value="${staff.contact_info || ''}" required>
+                </div>
+            </div>
+             <div class="row">
+                 <div class="col-md-6 mb-3">
+                    <label class="form-label">Role</label>
+                    <input type="text" class="form-control" value="${staff.role_name}" disabled>
+                </div>
+            </div>
+            <div class="modal-footer mt-4">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                <button type="submit" class="btn btn-primary">Save Changes</button>
+            </div>
+        </form>`;
+        formModal.show();
+        document.getElementById("modal-form").addEventListener("submit", (e) => {
+            e.preventDefault();
+            const endpoint = `/api/branch-manager/staff/${id}`;
+            submitForm(endpoint, "PUT", Object.fromEntries(new FormData(e.target)), loadStaffPage);
+        });
+    };
     const openPaymentForm = async (invoiceId) => {
         formModalLabel.textContent = `Record Payment for Invoice #${invoiceId}`;
         formModalBody.innerHTML = `<form id="modal-form">
@@ -375,7 +457,7 @@ document.addEventListener("DOMContentLoaded", () => {
         appointments: loadAppointmentsPage,
         staff: loadStaffPage,
         invoices: loadInvoicesPage,
-        reports: loadReportsPage
+        reports: loadReportsLandingPage // Changed from loadReportsPage
     };
 
     const navigateTo = (page) => {
@@ -393,12 +475,28 @@ document.addEventListener("DOMContentLoaded", () => {
     });
 
     mainContent.addEventListener("click", (e) => {
-        const target = e.target.closest("button[data-action]");
+        const target = e.target.closest("button[data-action], div[data-action='view']"); // Listen for div clicks too
         if (!target) return;
         const { action, type, id } = target.dataset;
+
+        // Handle report navigation
+        if (action === "view" && type === "doctor-revenue-report") {
+            loadDoctorRevenueReport();
+            return;
+        }
+        if (action === "view" && type === "outstanding-balances-report") {
+            loadOutstandingBalancesReport();
+            return;
+        }
+        if (action === "back" && type === "reports-landing") {
+            loadReportsLandingPage();
+            return;
+        }
+
         const entityMap = {
             patient: { refresh: loadPatientsPage, endpoint: 'patients', name: 'patient', handler: openPatientForm },
             staff: { refresh: loadStaffPage, endpoint: 'staff', name: 'staff member', handler: openStaffForm },
+            'staff-edit': { refresh: loadStaffPage, handler: openStaffEditForm },
             appointment: { refresh: loadAppointmentsPage, endpoint: 'branch-manager/appointments', name: 'appointment' },
             'branch-appointment': { refresh: loadAppointmentsPage, endpoint: 'branch-manager/appointments', name: 'appointment' },
             payment: { handler: openPaymentForm }
@@ -413,12 +511,6 @@ document.addEventListener("DOMContentLoaded", () => {
         } else if (action === "delete" && entity.endpoint) {
             deleteItem(`/api/${entity.endpoint}/${id}`, entity.name, entity.refresh);
         }
-    });
-
-    document.getElementById("logout-btn").addEventListener("click", () => {
-        localStorage.removeItem('clinicProToken');
-        localStorage.removeItem('clinicProRole');
-        window.location.href = 'login.html';
     });
 
     // Initial Load
