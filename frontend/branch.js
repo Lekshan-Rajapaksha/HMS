@@ -362,32 +362,74 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     const openStaffForm = async () => {
-        const roles = await fetchData("/api/list/roles");
-        if (!roles) return;
+        const [roles, specialties] = await Promise.all([
+            fetchData("/api/list/roles"),
+            fetchData("/api/list/specialties")
+        ]);
+        if (!roles || !specialties) return;
 
         const filteredRoles = roles.filter(r => r.name.toLowerCase() !== 'admin' && r.name.toLowerCase() !== 'branch manager');
 
         formModalLabel.textContent = "Add New Staff Member";
         formModalBody.innerHTML = `<form id="modal-form">
-            <input type="hidden" name="branch_id" value="${userProfile.branch_id}">
-            <div class="row">
-                <div class="col-md-6 mb-3"><label class="form-label">Full Name</label><input type="text" class="form-control" name="name" required></div>
-                <div class="col-md-6 mb-3"><label class="form-label">Contact Info</label><input type="text" class="form-control" name="contact_info" required></div>
+        <input type="hidden" name="branch_id" value="${userProfile.branch_id}">
+        <div class="row">
+            <div class="col-md-6 mb-3"><label class="form-label">Full Name</label><input type="text" class="form-control" name="name" required></div>
+            <div class="col-md-6 mb-3"><label class="form-label">Contact Info</label><input type="text" class="form-control" name="contact_info" required></div>
+        </div>
+        <div class="row">
+            <div class="col-md-6 mb-3">
+                <label class="form-label">Role</label>
+                <select class="form-select" id="staff-role-select" name="role_id" required>${createOptions(filteredRoles, "role_id", "name")}</select>
             </div>
-            <div class="row">
-                <div class="col-md-6 mb-3"><label class="form-label">Role</label><select class="form-select" name="role_id" required>${createOptions(filteredRoles, "role_id", "name")}</select></div>
-                <div class="col-md-6 mb-3"><label class="form-label">Is Medical Staff?</label><select class="form-select" name="is_medical_staff"><option value="1">Yes</option><option value="0" selected>No</option></select></div>
+            <div class="col-md-6 mb-3">
+                <label class="form-label">Is Medical Staff?</label>
+                <select class="form-select" id="medical-staff-select" name="is_medical_staff"><option value="1">Yes</option><option value="0" selected>No</option></select>
             </div>
-            <hr>
-            <h5 class="mb-3">Account Credentials</h5>
-            <div class="row">
-                <div class="col-md-4 mb-3"><label class="form-label">Username</label><input type="text" class="form-control" name="username" required></div>
-                <div class="col-md-4 mb-3"><label class="form-label">Email</label><input type="email" class="form-control" name="email"></div>
-                <div class="col-md-4 mb-3"><label class="form-label">Password</label><input type="password" class="form-control" name="password" required></div>
+        </div>
+        
+        <div class="row" id="specialty-field-container" style="display: none;">
+             <div class="col-md-6 mb-3">
+                <label class="form-label">Specialty</label>
+                 <select class="form-select" name="specialty_id">
+                     <option value="">Select specialty...</option>
+                     ${createOptions(specialties, "specialty_id", "name")}
+                 </select>
             </div>
-            <div class="modal-footer mt-4"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button><button type="submit" class="btn btn-primary">Create Staff Member</button></div>
-        </form>`;
+        </div>
+        <hr>
+
+        <h5 class="mb-3">Account Credentials</h5>
+        <div class="row">
+            <div class="col-md-4 mb-3"><label class="form-label">Username</label><input type="text" class="form-control" name="username" required></div>
+            <div class="col-md-4 mb-3"><label class="form-label">Email</label><input type="email" class="form-control" name="email"></div>
+            <div class="col-md-4 mb-3"><label class="form-label">Password</label><input type="password" class="form-control" name="password" required></div>
+        </div>
+        <div class="modal-footer mt-4"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button><button type="submit" class="btn btn-primary">Create Staff Member</button></div>
+    </form>`;
         formModal.show();
+
+        const roleSelect = document.getElementById("staff-role-select");
+        const medicalSelect = document.getElementById("medical-staff-select");
+        const specialtyContainer = document.getElementById("specialty-field-container");
+
+        const roleNameMap = Object.fromEntries(filteredRoles.map(r => [r.role_id, r.name.toLowerCase()]));
+
+        const toggleSpecialtyField = () => {
+            const selectedRoleName = roleNameMap[roleSelect.value];
+            if (selectedRoleName === 'doctor') {
+                specialtyContainer.style.display = "flex";
+                medicalSelect.value = "1";
+            } else {
+                specialtyContainer.style.display = "none";
+            }
+        };
+
+        roleSelect.addEventListener("change", toggleSpecialtyField);
+
+        // ⭐ ADD THIS LINE - Check on initial load
+        toggleSpecialtyField();
+
         document.getElementById("modal-form").addEventListener("submit", (e) => {
             e.preventDefault();
             submitForm("/api/staff", "POST", Object.fromEntries(new FormData(e.target)), loadStaffPage);
@@ -399,30 +441,35 @@ document.addEventListener("DOMContentLoaded", () => {
 
         formModalLabel.textContent = `Edit Staff: ${staff.name}`;
         formModalBody.innerHTML = `<form id="modal-form">
-            <div class="alert alert-secondary">
-                Role and credentials cannot be changed from this panel. Contact an Administrator for assistance.
+        <div class="alert alert-secondary">
+            Role and credentials cannot be changed from this panel. Contact an Administrator for assistance.
+        </div>
+        <div class="row">
+            <div class="col-md-6 mb-3">
+                <label class="form-label">Full Name</label>
+                <input type="text" class="form-control" name="name" value="${staff.name || ''}" required>
             </div>
-            <div class="row">
-                <div class="col-md-6 mb-3">
-                    <label class="form-label">Full Name</label>
-                    <input type="text" class="form-control" name="name" value="${staff.name || ''}" required>
-                </div>
-                <div class="col-md-6 mb-3">
-                    <label class="form-label">Contact Info</label>
-                    <input type="text" class="form-control" name="contact_info" value="${staff.contact_info || ''}" required>
-                </div>
+            <div class="col-md-6 mb-3">
+                <label class="form-label">Contact Info</label>
+                <input type="text" class="form-control" name="contact_info" value="${staff.contact_info || ''}" required>
             </div>
-             <div class="row">
-                 <div class="col-md-6 mb-3">
-                    <label class="form-label">Role</label>
-                    <input type="text" class="form-control" value="${staff.role_name}" disabled>
-                </div>
+        </div>
+        <div class="row">
+            <div class="col-md-6 mb-3">
+                <label class="form-label">Role</label>
+                <input type="text" class="form-control" value="${staff.role_name}" disabled>
             </div>
-            <div class="modal-footer mt-4">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                <button type="submit" class="btn btn-primary">Save Changes</button>
-            </div>
-        </form>`;
+            ${staff.specialty_name ? `
+            <div class="col-md-6 mb-3">
+                <label class="form-label">Specialty</label>
+                <input type="text" class="form-control" value="${staff.specialty_name}" disabled>
+            </div>` : ''}
+        </div>
+        <div class="modal-footer mt-4">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            <button type="submit" class="btn btn-primary">Save Changes</button>
+        </div>
+    </form>`;
         formModal.show();
         document.getElementById("modal-form").addEventListener("submit", (e) => {
             e.preventDefault();
@@ -512,7 +559,11 @@ document.addEventListener("DOMContentLoaded", () => {
             deleteItem(`/api/${entity.endpoint}/${id}`, entity.name, entity.refresh);
         }
     });
-
+    // --- LOGOUT HANDLER ---
+    document.getElementById('logout-btn').addEventListener('click', () => {
+        localStorage.removeItem('clinicProToken'); // Clear the token
+        window.location.href = 'login.html'; // Redirect to login
+    });
     // Initial Load
     const initializeDashboard = async () => {
         const profile = await fetchData("/api/branch-manager/profile");
