@@ -5,11 +5,6 @@ const API_BASE_URL = "http://localhost:3000";
 
 document.addEventListener("DOMContentLoaded", () => {
     // --- ELEMENT SELECTION ---
-    const token = localStorage.getItem('clinicProToken');
-    if (!token) {
-        window.location.href = 'login.html';
-        return; // Stop executing the rest of the script
-    }
     const mainContent = document.getElementById("main-content");
     const navLinks = document.querySelectorAll(".nav-link");
     const toastContainer = document.querySelector(".toast-container");
@@ -402,113 +397,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const openBranchForm = async (id = null) => {
         const isEditing = id !== null;
-
-        if (isEditing) {
-            // For editing, fetch branch details and the list of potential managers
-            const [data, managers] = await Promise.all([
-                fetchData(`/api/branches/${id}`),
-                fetchData(`/api/staff/managers`) // <-- New API call
-            ]);
-
-            if (!data || !managers) {
-                showToast("Could not load data for the branch form.", 'danger');
-                return;
-            }
-
-            formModalLabel.textContent = "Edit Branch";
-            // Form now includes a dropdown to change the manager
-            formModalBody.innerHTML = `<form id="modal-form">
-                <div class="mb-3">
-                    <label class="form-label">Name</label>
-                    <input type="text" class="form-control" name="name" value="${data.name || ''}" required>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Address</label>
-                    <input type="text" class="form-control" name="address" value="${data.address || ''}">
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Contact Number</label>
-                    <input type="text" class="form-control" name="contact_number" value="${data.contact_number || ''}">
-                </div>
-                <hr class="my-4">
-                <div class="mb-3">
-                    <label class="form-label">Branch Manager</label>
-                    <select class="form-select" name="manager_user_id">
-                        <option value="">No Manager Assigned</option>
-                        ${createOptions(managers, "user_id", "name", data.manager_user_id)}
-                    </select>
-                    <div class="form-text">Select an existing staff member with the 'Branch Manager' role.</div>
-                </div>
-                <div class="modal-footer mt-4">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                    <button type="submit" class="btn btn-primary">Save Changes</button>
-                </div>
-            </form>`;
-            formModal.show();
-            document.getElementById("modal-form").addEventListener("submit", (e) => {
-                e.preventDefault();
-                submitForm(`/api/branches/${id}`, "PUT", Object.fromEntries(new FormData(e.target)), loadBranchesPage);
-            });
-            return;
-        }
-
-        // --- Logic for creating a NEW branch remains the same ---
-        formModalLabel.textContent = "Add New Branch";
-        formModalBody.innerHTML = `<form id="modal-form">
-            <h5>Branch Details</h5>
-            <div class="row">
-                <div class="col-md-12 mb-3">
-                    <label class="form-label">Branch Name</label>
-                    <input type="text" class="form-control" name="name" required>
-                </div>
-                <div class="col-md-6 mb-3">
-                    <label class="form-label">Branch Address</label>
-                    <input type="text" class="form-control" name="address">
-                </div>
-                <div class="col-md-6 mb-3">
-                    <label class="form-label">Branch Contact Number</label>
-                    <input type="text" class="form-control" name="contact_number">
-                </div>
-            </div>
-            
-            <hr class="my-4">
-            
-            <h5>Branch Manager Details</h5>
-            <p class="text-muted small">This will create a new staff account for the manager.</p>
-            <div class="row">
-                <div class="col-md-6 mb-3">
-                    <label class="form-label">Manager Full Name</label>
-                    <input type="text" class="form-control" name="manager_name" required>
-                </div>
-                <div class="col-md-6 mb-3">
-                    <label class="form-label">Manager Contact Info</label>
-                    <input type="text" class="form-control" name="manager_contact_info" required>
-                </div>
-                <div class="col-md-6 mb-3">
-                    <label class="form-label">Manager Username</label>
-                    <input type="text" class="form-control" name="manager_username" required>
-                </div>
-                <div class="col-md-6 mb-3">
-                    <label class="form-label">Manager Account Email</label>
-                    <input type="email" class="form-control" name="manager_email" required>
-                </div>
-                <div class="col-md-6 mb-3">
-                    <label class="form-label">Manager Password</label>
-                    <input type="password" class="form-control" name="manager_password" required>
-                </div>
-            </div>
-
-            <div class="modal-footer mt-4">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                <button type="submit" class="btn btn-primary">Create Branch & Manager</button>
-            </div>
-        </form>`;
-
+        const data = isEditing ? await fetchData(`/api/branches/${id}`) : {};
+        formModalLabel.textContent = isEditing ? "Edit Branch" : "Add Branch";
+        formModalBody.innerHTML = `<form id="modal-form"><div class="mb-3"><label class="form-label">Name</label><input type="text" class="form-control" name="name" value="${data.name || ''}" required></div><div class="mb-3"><label class="form-label">Address</label><input type="text" class="form-control" name="address" value="${data.address || ''}"></div><div class="mb-3"><label class="form-label">Contact Number</label><input type="text" class="form-control" name="contact_number" value="${data.contact_number || ''}"></div><div class="modal-footer mt-4"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button><button type="submit" class="btn btn-primary">Save</button></div></form>`;
         formModal.show();
-        document.getElementById("modal-form").addEventListener("submit", (e) => {
-            e.preventDefault();
-            submitForm("/api/branches", "POST", Object.fromEntries(new FormData(e.target)), loadBranchesPage);
-        });
+        document.getElementById("modal-form").addEventListener("submit", (e) => { e.preventDefault(); const endpoint = isEditing ? `/api/branches/${id}` : "/api/branches"; submitForm(endpoint, isEditing ? "PUT" : "POST", Object.fromEntries(new FormData(e.target)), loadBranchesPage); });
     };
 
     const openProviderForm = async (id = null) => {

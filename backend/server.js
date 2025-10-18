@@ -1,25 +1,28 @@
 // server.js
-require('dotenv').config();
 
 const express = require("express");
 const mysql = require("mysql2/promise");
 const cors = require("cors");
-const jwt = require('jsonwebtoken');
-const bcrypt = require('bcryptjs');
+const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
+require("dotenv").config();
+
+// Import Phase 1 middleware
+const auditLogger = require('./middleware/auditLogger');
+const { sessionManager, createSession, destroySession } = require('./middleware/sessionManager');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// --- SECRET KEY (IMPORTANT!) ---
-// In a real app, store this in an environment variable (e.g., process.env.JWT_SECRET)
-const JWT_SECRET = process.env.JWT_SECRET;
+// JWT Secret for token signing (Phase 1 Security)
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
 
 // --- DATABASE CONFIGURATION ---
 const dbConfig = {
-    host: process.env.DB_HOST,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME,
+    host: process.env.DB_HOST || "localhost",
+    user: process.env.DB_USER || "root",
+    password: process.env.DB_PASSWORD || "Lekshan123@",
+    database: process.env.DB_NAME || "hospital_managment",
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0,
@@ -27,14 +30,25 @@ const dbConfig = {
 
 const pool = mysql.createPool(dbConfig);
 
+// Export pool for use in middleware
+module.exports = { pool };
+
 // --- MIDDLEWARE ---
 app.use(cors());
 app.use(express.json());
 
+// Serve static frontend files
+const path = require('path');
+app.use(express.static(path.join(__dirname, '../frontend')));
+
+// Apply Phase 1 Security Middleware
+app.use(auditLogger(pool)); // Logs all doctor actions to audit_log
+app.use(sessionManager(pool)); // Enforces 30-minute session timeout
+
 // --- UTILITY FUNCTION for error handling ---
 const handleDatabaseError = (res, err) => {
     console.error("Database Error:", err);
-    res.status(500).json({ message: "An internal server error occurred." });
+    res.status(500).json({ error: "An internal server error occurred." });
 };
 
 // --- AUTHENTICATION & AUTHORIZATION ---
@@ -97,8 +111,32 @@ app.post("/api/login", async (req, res) => {
             { expiresIn: '8h' }
         );
 
+        // Create session for tracking and timeout enforcement
+        const ipAddress = req.ip || req.connection.remoteAddress;
+        const userAgent = req.headers['user-agent'];
+        await createSession(pool, user.user_id, token, ipAddress, userAgent);
+
         res.json({ message: "Login successful", token, role: user.role.toLowerCase() });
 
+    } catch (err) {
+        handleDatabaseError(res, err);
+    }
+});
+
+// Logout Endpoint
+app.post("/api/logout", authorize(['admin', 'doctor', 'receptionist', 'branch manager']), async (req, res) => {
+    try {
+        const token = req.headers.authorization.split(' ')[1];
+        const userId = req.user.userId;
+
+        // Destroy session
+        const destroyed = await destroySession(pool, userId, token);
+
+        if (destroyed) {
+            res.json({ message: "Logout successful" });
+        } else {
+            res.status(404).json({ message: "Session not found" });
+        }
     } catch (err) {
         handleDatabaseError(res, err);
     }
@@ -107,96 +145,88 @@ app.post("/api/login", async (req, res) => {
 // --- GENERIC CRUD Endpoints (Protected for Admins) ---
 const createCrudEndpoints = (entityName, tableName, idColumn) => {
     const endpoint = `/api/${entityName}`;
-
-    app.get(endpoint, authorize(['admin']), async (req, res) => {
-        try {
-            const [rows] = await pool.query(`SELECT * FROM ${tableName}`);
-            res.json(rows);
-        } catch (err) {
-            handleDatabaseError(res, err);
-        }
+    app.get(endpoint, async (req, res) => {
+        try { const [rows] = await pool.query(`SELECT * FROM ${tableName}`); res.json(rows); } 
+        catch (err) { handleDatabaseError(res, err); }
     });
-
-    app.get(`${endpoint}/:id`, authorize(['admin']), async (req, res) => {
+    app.get(`${endpoint}/:id`, async (req, res) => {
         try {
             const [rows] = await pool.query(`SELECT * FROM ${tableName} WHERE ${idColumn} = ?`, [req.params.id]);
-            if (rows.length === 0) return res.status(404).json({ message: `${entityName} not found` });
+            if (rows.length === 0) return res.status(404).json({ error: `${entityName} not found` });
             res.json(rows[0]);
-        } catch (err) {
-            handleDatabaseError(res, err);
-        }
+        } catch (err) { handleDatabaseError(res, err); }
     });
-
-    app.post(endpoint, authorize(['admin']), async (req, res) => {
+    app.post(endpoint, async (req, res) => {
         try {
             const columns = Object.keys(req.body).join(', ');
             const placeholders = Object.keys(req.body).map(() => '?').join(', ');
             const values = Object.values(req.body);
             await pool.query(`INSERT INTO ${tableName} (${columns}) VALUES (${placeholders})`, values);
             res.status(201).json({ message: `${entityName} created successfully` });
-        } catch (err) {
-            handleDatabaseError(res, err);
-        }
+        } catch (err) { handleDatabaseError(res, err); }
     });
-
-    app.put(`${endpoint}/:id`, authorize(['admin']), async (req, res) => {
+    app.put(`${endpoint}/:id`, async (req, res) => {
         try {
             const updates = Object.keys(req.body).map(key => `${key} = ?`).join(', ');
             const values = [...Object.values(req.body), req.params.id];
             await pool.query(`UPDATE ${tableName} SET ${updates} WHERE ${idColumn} = ?`, values);
             res.status(200).json({ message: `${entityName} updated successfully` });
-        } catch (err) {
-            handleDatabaseError(res, err);
-        }
+        } catch (err) { handleDatabaseError(res, err); }
     });
-
-    app.delete(`${endpoint}/:id`, authorize(['admin']), async (req, res) => {
+    app.delete(`${endpoint}/:id`, async (req, res) => {
         try {
             await pool.query(`DELETE FROM ${tableName} WHERE ${idColumn} = ?`, [req.params.id]);
             res.status(204).send();
-        } catch (err) {
-            handleDatabaseError(res, err);
-        }
+        } catch (err) { handleDatabaseError(res, err); }
     });
 };
 
 // --- API ROUTES ---
 
-// Lists can be accessed by admin, receptionist, doctor, and branch manager for forms
-app.get("/api/list/:type", authorize(['admin', 'receptionist', 'doctor', 'branch manager']), async (req, res) => {
+// --- GET Lists for Forms ---
+app.get("/api/list/:type", async (req, res) => {
     const { type } = req.params;
     let query;
     try {
         switch (type) {
-            case "patients": query = "SELECT patient_id, name FROM Patient ORDER BY patient_id"; break;
-            case "doctors": query = "SELECT d.doctor_id, s.name, sp.name as specialty FROM Doctor d JOIN Staff s ON d.staff_id = s.staff_id LEFT JOIN doctor_specialties ds ON d.doctor_id = ds.doctor_id LEFT JOIN Specialties sp ON ds.specialty_id = sp.specialty_id ORDER BY s.name"; break;
+            case "patients": query = "SELECT patient_id, name FROM Patient ORDER BY name"; break;
+            case "doctors": query = "SELECT d.doctor_id, s.name FROM Doctor d JOIN Staff s ON d.staff_id = s.staff_id ORDER BY s.name"; break;
             case "branches": query = "SELECT branch_id, name FROM Branch ORDER BY name"; break;
             case "roles": query = "SELECT role_id, name FROM Role ORDER BY name"; break;
             case "insurance-providers": query = "SELECT id, name FROM Insurance_Provider ORDER BY name"; break;
-            case "specialties": query = "SELECT specialty_id, name FROM Specialties ORDER BY name"; break;
-            default: return res.status(404).json({ message: "List type not found" });
+            default: return res.status(404).json({ error: "List type not found" });
         }
         const [results] = await pool.query(query);
         res.json(results);
-    } catch (err) {
-        handleDatabaseError(res, err);
-    }
+    } catch (err) { handleDatabaseError(res, err); }
 });
 
-// Admin Dashboard stats
-app.get("/api/stats/treatment-distribution", authorize(['admin']), async (req, res) => {
+// --- Dashboard Stats Endpoints ---
+app.get("/api/stats/treatment-distribution", async (req, res) => {
     try {
-        const [rows] = await pool.query(`SELECT tc.name, COUNT(at.service_code) as count FROM Appointment_Treatment at JOIN Treatment_Catalogue tc ON at.service_code = tc.service_code GROUP BY tc.name ORDER BY count DESC LIMIT 5;`);
+        const [rows] = await pool.query(`
+            SELECT tc.name, COUNT(at.service_code) as count
+            FROM Appointment_Treatment at
+            JOIN Treatment_Catalogue tc ON at.service_code = tc.service_code
+            GROUP BY tc.name ORDER BY count DESC LIMIT 5;
+        `);
         res.json(rows);
     } catch (err) { handleDatabaseError(res, err); }
 });
-app.get("/api/stats/daily-patients", authorize(['admin']), async (req, res) => {
+
+app.get("/api/stats/daily-patients", async (req, res) => {
     try {
-        const [rows] = await pool.query(`SELECT DATE(schedule_date) as date, COUNT(DISTINCT patient_id) as count FROM Appointment WHERE schedule_date >= CURDATE() - INTERVAL 7 DAY GROUP BY DATE(schedule_date) ORDER BY date ASC;`);
+        const [rows] = await pool.query(`
+            SELECT DATE(schedule_date) as date, COUNT(DISTINCT patient_id) as count
+            FROM Appointment
+            WHERE schedule_date >= CURDATE() - INTERVAL 7 DAY
+            GROUP BY DATE(schedule_date) ORDER BY date ASC;
+        `);
         res.json(rows);
     } catch (err) { handleDatabaseError(res, err); }
 });
-app.get("/api/stats/summary", authorize(['admin']), async (req, res) => {
+
+app.get("/api/stats/summary", async (req, res) => {
     try {
         const [[{ patients }]] = await pool.query("SELECT COUNT(*) as patients FROM Patient");
         const [[{ appointments }]] = await pool.query("SELECT COUNT(*) as appointments FROM Appointment WHERE status = 'Scheduled'");
@@ -205,581 +235,127 @@ app.get("/api/stats/summary", authorize(['admin']), async (req, res) => {
     } catch (err) { handleDatabaseError(res, err); }
 });
 
-// Patients (GET for admin/receptionist/manager, POST/PUT for admin/receptionist/manager, DELETE for admin/manager)
-app.get("/api/patients", authorize(['admin', 'receptionist', 'branch manager']), async (req, res) => {
+// --- Specific Endpoints (for complex queries) ---
+app.get("/api/patients", async (req, res) => {
     try {
         const [rows] = await pool.query(`SELECT *, TIMESTAMPDIFF(YEAR, date_of_birth, CURDATE()) AS age FROM Patient ORDER BY name`);
         res.json(rows);
     } catch (err) { handleDatabaseError(res, err); }
 });
+// Note: We are overriding the generic GET /api/patients with the one above, but using the generic POST, PUT, DELETE.
+createCrudEndpoints('patients', 'Patient', 'patient_id');
 
-app.get("/api/patients/:id", authorize(['admin', 'receptionist', 'branch manager']), async (req, res) => {
+app.get("/api/appointments", async (req, res) => {
     try {
-        const [rows] = await pool.query(`SELECT * FROM Patient WHERE patient_id = ?`, [req.params.id]);
-        if (rows.length === 0) {
-            return res.status(404).json({ message: "Patient not found" });
-        }
-        res.json(rows[0]);
-    } catch (err) {
-        handleDatabaseError(res, err);
-    }
-});
-
-app.post("/api/patients", authorize(['admin', 'receptionist', 'branch manager']), async (req, res) => {
-    try {
-        const columns = Object.keys(req.body).join(', ');
-        const placeholders = '?,'.repeat(Object.keys(req.body).length).slice(0, -1);
-        await pool.query(`INSERT INTO Patient (${columns}) VALUES (${placeholders})`, Object.values(req.body));
-        res.status(201).json({ message: `Patient created successfully` });
-    } catch (err) { handleDatabaseError(res, err); }
-});
-app.put("/api/patients/:id", authorize(['admin', 'receptionist', 'branch manager']), async (req, res) => {
-    try {
-        const updates = Object.keys(req.body).map(key => `${key} = ?`).join(', ');
-        await pool.query(`UPDATE Patient SET ${updates} WHERE patient_id = ?`, [...Object.values(req.body), req.params.id]);
-        res.status(200).json({ message: `Patient updated successfully` });
-    } catch (err) { handleDatabaseError(res, err); }
-});
-
-app.get("/api/patients/:id/details", authorize(['admin', 'receptionist', 'branch manager']), async (req, res) => {
-    const patientId = req.params.id;
-    const connection = await pool.getConnection();
-
-    try {
-        // 1. Get patient profile
-        const [profileRows] = await connection.query(
-            `SELECT p.*, TIMESTAMPDIFF(YEAR, p.date_of_birth, CURDATE()) AS age, ip.name as insurance_provider_name 
-             FROM Patient p 
-             LEFT JOIN Insurance_Provider ip ON p.insurance_provider_id = ip.id 
-             WHERE p.patient_id = ?`,
-            [patientId]
-        );
-
-        if (profileRows.length === 0) {
-            return res.status(404).json({ message: "Patient not found." });
-        }
-
-        // 2. Get appointment history with invoice info
-        const [historyRows] = await connection.query(
-            `SELECT 
-                 a.appointment_id, a.schedule_date, a.status,
-                 s.name AS doctor_name,
-                 i.invoice_id, i.total_amount, i.due_amount, i.status AS invoice_status
-             FROM Appointment a
-             JOIN Doctor d ON a.doctor_id = d.doctor_id
-             JOIN Staff s ON d.staff_id = s.staff_id
-             LEFT JOIN Invoice i ON a.appointment_id = i.appointment_id
-             WHERE a.patient_id = ?
-             ORDER BY a.schedule_date DESC`,
-            [patientId]
-        );
-
-        // 3. Get all payments for this patient's invoices
-        const [paymentRows] = await connection.query(
-            `SELECT p.* FROM Payment p
-             JOIN Invoice i ON p.invoice_id = i.invoice_id
-             JOIN Appointment a ON i.appointment_id = a.appointment_id
-             WHERE a.patient_id = ?
-             ORDER BY p.payment_date ASC`,
-            [patientId]
-        );
-
-        // 4. Combine the data for a clean response
-        const history = historyRows.map(appointment => ({
-            ...appointment,
-            payments: paymentRows.filter(p => p.invoice_id === appointment.invoice_id)
-        }));
-
-        res.json({
-            profile: profileRows[0],
-            history: history
-        });
-
-    } catch (err) {
-        handleDatabaseError(res, err);
-    } finally {
-        connection.release();
-    }
-});
-
-// FIX: Added 'branch manager' to allow deletion. Patient data is global as per system design.
-app.delete("/api/patients/:id", authorize(['admin', 'branch manager']), async (req, res) => {
-    try {
-        await pool.query(`DELETE FROM Patient WHERE patient_id = ?`, [req.params.id]);
-        res.status(204).send();
-    } catch (err) { handleDatabaseError(res, err); }
-});
-
-// Appointments
-app.get("/api/appointments", authorize(['admin', 'receptionist']), async (req, res) => {
-    try {
-        const [rows] = await pool.query(`SELECT a.*, p.name as patient_name, s.name as doctor_name, b.name as branch_name FROM Appointment a JOIN Patient p ON a.patient_id = p.patient_id JOIN Doctor d ON a.doctor_id = d.doctor_id JOIN Staff s ON d.staff_id = s.staff_id JOIN Branch b ON a.branch_id = b.branch_id ORDER BY a.schedule_date DESC`);
-        res.json(rows);
-    } catch (err) { handleDatabaseError(res, err); }
-});
-
-// Get completed appointments that don't have an invoice yet
-app.get("/api/appointments/uninvoiced", authorize(['admin', 'receptionist']), async (req, res) => {
-    try {
-        // MODIFIED QUERY: Added p.insurance_provider_id to the selection
         const [rows] = await pool.query(`
-            SELECT 
-                a.appointment_id, 
-                a.schedule_date, 
-                p.name AS patient_name,
-                p.insurance_provider_id 
+            SELECT a.*, p.name as patient_name, s.name as doctor_name, b.name as branch_name
             FROM Appointment a
             JOIN Patient p ON a.patient_id = p.patient_id
-            LEFT JOIN Invoice i ON a.appointment_id = i.appointment_id
-            WHERE a.status = 'Completed' AND i.invoice_id IS NULL
-            ORDER BY a.schedule_date DESC
-        `);
+            JOIN Doctor d ON a.doctor_id = d.doctor_id
+            JOIN Staff s ON d.staff_id = s.staff_id
+            JOIN Branch b ON a.branch_id = b.branch_id
+            ORDER BY a.schedule_date DESC`);
         res.json(rows);
-    } catch (err) {
-        handleDatabaseError(res, err);
-    }
-});
-
-app.get("/api/appointments/:id", authorize(['admin', 'receptionist']), async (req, res) => {
-    try {
-        const [rows] = await pool.query(`SELECT * FROM Appointment WHERE appointment_id = ?`, [req.params.id]);
-        if (rows.length === 0) {
-            return res.status(404).json({ message: "Appointment not found" });
-        }
-        res.json(rows[0]);
-    } catch (err) {
-        handleDatabaseError(res, err);
-    }
-});
-
-app.get("/api/appointments/doctor/:id", authorize(['admin', 'receptionist']), async (req, res) => {
-    try {
-        const { id } = req.params;
-        const { date } = req.query;
-
-        if (!date) {
-            return res.status(400).json({ message: "A date query parameter is required." });
-        }
-
-        const [rows] = await pool.query(
-            `SELECT a.schedule_date, p.name as patient_name 
-             FROM Appointment a 
-             JOIN Patient p ON a.patient_id = p.patient_id 
-             WHERE a.doctor_id = ? AND DATE(a.schedule_date) = ?`,
-            [id, date]
-        );
-        res.json(rows);
-
-    } catch (err) {
-        handleDatabaseError(res, err);
-    }
-});
-
-app.get("/api/doctors/:id/availability", authorize(['admin', 'receptionist']), async (req, res) => {
-    try {
-        const { id } = req.params;
-        const { date } = req.query;
-
-        if (!date) {
-            return res.status(400).json({ message: "A date query parameter is required." });
-        }
-
-        const startTime = 9; // 9:00 AM
-        const endTime = 17; // 5:00 PM
-        const slotDurationMinutes = 30;
-
-        const [bookedAppointments] = await pool.query(
-            `SELECT TIME(schedule_date) as booked_time FROM Appointment WHERE doctor_id = ? AND DATE(schedule_date) = ?`,
-            [id, date]
-        );
-        const bookedSlots = new Set(bookedAppointments.map(appt => appt.booked_time));
-
-        const availableSlots = [];
-        for (let hour = startTime; hour < endTime; hour++) {
-            for (let minute = 0; minute < 60; minute += slotDurationMinutes) {
-                const hourString = hour.toString().padStart(2, '0');
-                const minuteString = minute.toString().padStart(2, '0');
-                const timeSlot = `${hourString}:${minuteString}:00`;
-                const shortTimeSlot = `${hourString}:${minuteString}`;
-
-                if (!bookedSlots.has(timeSlot)) {
-                    availableSlots.push(shortTimeSlot);
-                }
-            }
-        }
-
-        res.json(availableSlots);
-
-    } catch (err) {
-        handleDatabaseError(res, err);
-    }
-});
-
-app.post("/api/appointments", authorize(['admin', 'receptionist']), async (req, res) => {
-    try {
-        const columns = Object.keys(req.body).join(', ');
-        const placeholders = '?,'.repeat(Object.keys(req.body).length).slice(0, -1);
-
-        await pool.query(`INSERT INTO Appointment (${columns}) VALUES (${placeholders})`, Object.values(req.body));
-
-        res.status(201).json({ message: `Appointment created successfully` });
-    } catch (err) {
-        handleDatabaseError(res, err);
-    }
-});
-
-app.put("/api/appointments/:id", authorize(['admin', 'receptionist']), async (req, res) => {
-    const connection = await pool.getConnection();
-    try {
-        await connection.beginTransaction();
-
-        const appointmentId = req.params.id;
-        const requestBody = req.body;
-        const { userId } = req.user;
-
-        // Check if this is a reschedule or a general update
-        if (requestBody.status === 'Rescheduled' && requestBody.schedule_date) {
-            const newDate = new Date(requestBody.schedule_date).toISOString().slice(0, 19).replace('T', ' ');
-
-            const [[staffMember]] = await connection.query('SELECT staff_id FROM Staff WHERE user_id = ?', [userId]);
-            const [[currentAppointment]] = await connection.query('SELECT schedule_date FROM Appointment WHERE appointment_id = ?', [appointmentId]);
-
-            if (!staffMember || !currentAppointment) {
-                throw new Error("Could not find staff or appointment details.");
-            }
-
-            const [logResult] = await connection.query(
-                'INSERT INTO rescheduled_appointments (previous_appointment_id, previous_date, new_date, rescheduled_by_staff_id, reschedule_reason) VALUES (?, ?, ?, ?, ?)',
-                [appointmentId, currentAppointment.schedule_date, newDate, staffMember.staff_id, requestBody.reschedule_reason || null]
-            );
-
-            await connection.query(
-                "UPDATE Appointment SET schedule_date = ?, reschedule_id = ?, status = 'Rescheduled' WHERE appointment_id = ?",
-                [newDate, logResult.insertId, appointmentId]
-            );
-
-            await connection.commit();
-            res.status(200).json({ message: `Appointment rescheduled successfully` });
-
-        } else {
-            // Handle a general update (e.g., just changing status, or other details)
-            const updates = Object.keys(requestBody).map(key => `${key} = ?`).join(', ');
-            const values = [...Object.values(requestBody), appointmentId];
-            await connection.query(`UPDATE Appointment SET ${updates} WHERE appointment_id = ?`, values);
-
-            await connection.commit();
-            res.status(200).json({ message: 'Appointment updated successfully' });
-        }
-    } catch (err) {
-        await connection.rollback();
-        handleDatabaseError(res, err);
-    } finally {
-        connection.release();
-    }
-});
-
-app.delete("/api/appointments/:id", authorize(['admin', 'receptionist']), async (req, res) => {
-    try {
-        await pool.query(`DELETE FROM Appointment WHERE appointment_id = ?`, [req.params.id]);
-        res.status(204).send();
     } catch (err) { handleDatabaseError(res, err); }
 });
+createCrudEndpoints('appointments', 'Appointment', 'appointment_id');
 
-// --- INVOICE API ENDPOINTS ---
-
-// GET all invoices
-app.get("/api/invoices", authorize(['admin', 'receptionist']), async (req, res) => {
+app.get("/api/doctors", async (req, res) => {
     try {
         const [rows] = await pool.query(`
-            SELECT i.*, p.name as patient_name
-            FROM Invoice i
-            JOIN Appointment a ON i.appointment_id = a.appointment_id
-            JOIN Patient p ON a.patient_id = p.patient_id
-            ORDER BY i.issued_date DESC
-        `);
+            SELECT d.doctor_id, s.name, s.contact_info, b.name as branch_name
+            FROM Doctor d
+            JOIN Staff s ON d.staff_id = s.staff_id
+            JOIN Branch b ON s.branch_id = b.branch_id
+            ORDER BY s.name`);
         res.json(rows);
     } catch (err) { handleDatabaseError(res, err); }
 });
 
-// GET a single invoice by ID
-app.get("/api/invoices/:id", authorize(['admin', 'receptionist']), async (req, res) => {
+app.get("/api/staff", async (req, res) => {
     try {
         const [rows] = await pool.query(`
-            SELECT i.*, p.name as patient_name 
-            FROM Invoice i
-            JOIN Appointment a ON i.appointment_id = a.appointment_id
-            JOIN Patient p ON a.patient_id = p.patient_id
-            WHERE i.invoice_id = ?
-        `, [req.params.id]);
-        if (rows.length === 0) {
-            return res.status(404).json({ message: "Invoice not found" });
-        }
-        res.json(rows[0]);
-    } catch (err) {
-        handleDatabaseError(res, err);
-    }
-});
-
-// POST a new invoice
-app.post("/api/invoices", authorize(['admin', 'receptionist']), async (req, res) => {
-    const connection = await pool.getConnection();
-    try {
-        await connection.beginTransaction();
-
-        const { appointment_id, total_amount, insurance_coverage, issued_date, due_date, initial_payment } = req.body;
-
-        if (!appointment_id || !total_amount || !issued_date || !due_date) {
-            return res.status(400).json({ message: "Missing required fields for invoice." });
-        }
-
-        const total = parseFloat(total_amount);
-        const coverage = parseFloat(insurance_coverage) || 0;
-        const paidNow = parseFloat(initial_payment) || 0;
-
-        const out_of_pocket_amount = total - coverage;
-        let due_amount = out_of_pocket_amount - paidNow; // Calculate remaining due amount
-        let status = 'Pending'; // Default status
-
-        // Determine status based on initial payment
-        if (paidNow > 0) {
-            if (due_amount <= 0) {
-                status = 'Paid';
-            } else {
-                status = 'Partially Paid';
-            }
-        }
-
-        // Step 1: Create the invoice with calculated amounts and status
-        const invoiceData = {
-            appointment_id,
-            total_amount: total,
-            insurance_coverage: coverage,
-            out_of_pocket_amount,
-            due_amount, // The final due amount is stored
-            status,
-            issued_date,
-            due_date,
-        };
-
-        const columns = Object.keys(invoiceData).join(', ');
-        const placeholders = Object.keys(invoiceData).map(() => '?').join(', ');
-        const values = Object.values(invoiceData);
-
-        const [invoiceResult] = await connection.query(`INSERT INTO Invoice (${columns}) VALUES (${placeholders})`, values);
-        const newInvoiceId = invoiceResult.insertId;
-
-        // Step 2: If there was an initial payment, create a record for it
-        if (paidNow > 0) {
-            await connection.query(
-                "INSERT INTO Payment (invoice_id, paid_amount, payment_date, method_of_payment, status) VALUES (?, ?, ?, ?, ?)",
-                [newInvoiceId, paidNow, new Date(), 'Initial Payment', 'Completed']
-            );
-        }
-
-        await connection.commit();
-        res.status(201).json({ message: "Invoice and initial payment recorded successfully." });
-
-    } catch (err) {
-        await connection.rollback();
-        if (err.code === 'ER_DUP_ENTRY') {
-            return res.status(409).json({ message: 'An invoice already exists for this appointment.' });
-        }
-        handleDatabaseError(res, err);
-    } finally {
-        connection.release();
-    }
-});
-
-// PUT (update) an existing invoice
-app.put("/api/invoices/:id", authorize(['admin', 'receptionist']), async (req, res) => {
-    try {
-        const { total_amount, insurance_coverage, status, issued_date, due_date } = req.body;
-        const invoiceId = req.params.id;
-
-        const total = parseFloat(total_amount);
-        const coverage = parseFloat(insurance_coverage) || 0;
-        const out_of_pocket_amount = total - coverage;
-
-        const updates = {
-            total_amount: total,
-            insurance_coverage: coverage,
-            out_of_pocket_amount,
-            status,
-            issued_date,
-            due_date
-        };
-
-        const updateQuery = Object.keys(updates).map(key => `${key} = ?`).join(', ');
-        const values = [...Object.values(updates), invoiceId];
-
-        await pool.query(`UPDATE Invoice SET ${updateQuery} WHERE invoice_id = ?`, values);
-        res.status(200).json({ message: "Invoice updated successfully." });
-
-    } catch (err) {
-        handleDatabaseError(res, err);
-    }
-});
-
-
-// DELETE an invoice
-app.delete("/api/invoices/:id", authorize(['admin', 'receptionist']), async (req, res) => {
-    try {
-        await pool.query('DELETE FROM Invoice WHERE invoice_id = ?', [req.params.id]);
-        res.status(204).send();
-    } catch (err) {
-        handleDatabaseError(res, err);
-    }
-});
-
-// Doctors (Admin Only)
-app.get("/api/doctors", authorize(['admin']), async (req, res) => {
-    try {
-        const [rows] = await pool.query(`SELECT d.doctor_id, s.name, s.contact_info, b.name as branch_name FROM Doctor d JOIN Staff s ON d.staff_id = s.staff_id JOIN Branch b ON s.branch_id = b.branch_id ORDER BY s.name`);
+            SELECT s.*, r.name as role_name, b.name as branch_name
+            FROM Staff s
+            JOIN Account_Info ai ON s.user_id = ai.user_id
+            JOIN Role r ON ai.role_id = r.role_id
+            JOIN Branch b ON s.branch_id = b.branch_id
+            ORDER BY s.name`);
         res.json(rows);
     } catch (err) { handleDatabaseError(res, err); }
 });
 
-// Staff (Admin Only)
-app.get("/api/staff", authorize(['admin']), async (req, res) => {
-    try {
-        const [rows] = await pool.query(`SELECT s.*, r.name as role_name, b.name as branch_name FROM Staff s LEFT JOIN Account_Info ai ON s.user_id = ai.user_id LEFT JOIN Role r ON ai.role_id = r.role_id LEFT JOIN Branch b ON s.branch_id = b.branch_id ORDER BY s.name`);
-        res.json(rows);
-    } catch (err) { handleDatabaseError(res, err); }
-});
-
-// FIX: Add 'branch manager' to the authorization list for creating staff
-app.post("/api/staff", authorize(['admin', 'branch manager']), async (req, res) => {
+app.post("/api/staff", async (req, res) => {
     const connection = await pool.getConnection();
     try {
         await connection.beginTransaction();
-        const { name, contact_info, branch_id, role_id, username, email, password, is_medical_staff, specialty_id } = req.body;
-
-        // Security check for Branch Manager: ensure they are not creating an Admin or another Manager
-        if (req.user.role === 'branch manager') {
-            const [[role_to_assign]] = await connection.query("SELECT name FROM Role WHERE role_id = ?", [role_id]);
-            if (!role_to_assign || ['Admin', 'Branch Manager'].includes(role_to_assign.name)) {
-                throw new Error("Branch managers cannot create Admin or other Manager accounts.");
-            }
-
-            // Security check: ensure manager is adding staff to their OWN branch
-            const [[manager_branch]] = await connection.query("SELECT branch_id FROM Staff WHERE user_id = ?", [req.user.userId]);
-            if (!manager_branch || manager_branch.branch_id.toString() !== branch_id.toString()) {
-                throw new Error("You can only add staff to your own branch.");
-            }
-        }
-
-        if (!password) {
-            throw new Error("Password is required for new staff.");
-        }
-
-        const salt = await bcrypt.genSalt(10);
-        const password_hash = await bcrypt.hash(password, salt);
+        const { name, contact_info, branch_id, role_id, username, email, is_medical_staff } = req.body;
+        // In a real app, use a library like bcrypt to hash passwords securely
+        const password_hash = "placeholder_hash"; 
         const [accountResult] = await connection.query("INSERT INTO Account_Info (role_id, username, password_hash, email) VALUES (?, ?, ?, ?)", [role_id, username, password_hash, email]);
         const newUserId = accountResult.insertId;
-        const [staffResult] = await connection.query("INSERT INTO Staff (user_id, name, contact_info, is_medical_staff, branch_id) VALUES (?, ?, ?, ?, ?)", [newUserId, name, contact_info, is_medical_staff === '1', branch_id]);
-        const newStaffId = staffResult.insertId;
-
-        if (parseInt(role_id, 10) === 2) { // Assuming 'Doctor' role_id is 2
-            if (!specialty_id) { throw new Error("A specialty is required to create a new doctor."); }
-            const [doctorResult] = await connection.query("INSERT INTO Doctor (staff_id) VALUES (?)", [newStaffId]);
-            const newDoctorId = doctorResult.insertId;
-            await connection.query("INSERT INTO doctor_specialties (doctor_id, specialty_id) VALUES (?, ?)", [newDoctorId, specialty_id]);
-        }
-
+        await connection.query("INSERT INTO Staff (user_id, name, contact_info, is_medical_staff, branch_id) VALUES (?, ?, ?, ?, ?)", [newUserId, name, contact_info, is_medical_staff === '1', branch_id]);
         await connection.commit();
-        res.status(201).json({ message: "Staff record created successfully." });
+        res.status(201).json({ message: "Staff created successfully" });
     } catch (err) {
         await connection.rollback();
-        console.error("Error creating staff:", err);
-        res.status(500).json({ message: err.message || "An internal server error occurred." });
+        handleDatabaseError(res, err);
     } finally {
         connection.release();
     }
 });
 
-////////
-app.get("/api/staff/managers", authorize(['admin']), async (req, res) => {
+app.get("/api/invoices", async (req, res) => {
     try {
         const [rows] = await pool.query(`
-      SELECT s.user_id, s.name
-      FROM Staff s
-      JOIN Account_Info ai ON s.user_id = ai.user_id
-      JOIN Role r ON ai.role_id = r.role_id
-      WHERE r.name = 'Branch Manager'
-      ORDER BY s.name ASC
-    `);
+            SELECT i.*, p.name as patient_name, (i.total_amount - (SELECT IFNULL(SUM(paid_amount), 0) FROM Payment WHERE invoice_id = i.invoice_id)) as outstanding_balance
+            FROM Invoice i
+            JOIN Appointment a ON i.appointment_id = a.appointment_id
+            JOIN Patient p ON a.patient_id = p.patient_id
+            ORDER BY i.issued_date DESC`);
         res.json(rows);
-    } catch (err) {
-        handleDatabaseError(res, err);
-    }
+    } catch(err) { handleDatabaseError(res, err); }
 });
 
-///////
-
-// Payments (Admin Only)
-app.get("/api/payments/by-invoice/:invoiceId", authorize(['admin', 'receptionist']), async (req, res) => {
+app.get("/api/payments/by-invoice/:invoiceId", async (req, res) => {
     try {
         const [rows] = await pool.query("SELECT * FROM Payment WHERE invoice_id = ?", [req.params.invoiceId]);
         res.json(rows);
-    } catch (err) { handleDatabaseError(res, err); }
+    } catch(err) { handleDatabaseError(res, err); }
 });
 
-// MODIFIED: This endpoint now correctly handles partial payments and is accessible by receptionists.
-app.post("/api/payments", authorize(['admin', 'receptionist']), async (req, res) => {
+app.post("/api/payments", async (req, res) => {
     const connection = await pool.getConnection();
     try {
         await connection.beginTransaction();
-        const { invoice_id, paid_amount, payment_date, method_of_payment } = req.body;
-
-        if (!invoice_id || !paid_amount || !payment_date || !method_of_payment) {
-            return res.status(400).json({ message: "Missing required payment fields." });
-        }
-
-        // Step 1: Insert the new payment record
-        await connection.query(
-            "INSERT INTO Payment (invoice_id, paid_amount, payment_date, method_of_payment, status) VALUES (?, ?, ?, ?, ?)",
-            [invoice_id, paid_amount, payment_date, method_of_payment, 'Completed']
-        );
-
-        // Step 2: Update the invoice's due amount
-        await connection.query(
-            "UPDATE Invoice SET due_amount = due_amount - ? WHERE invoice_id = ?",
-            [paid_amount, invoice_id]
-        );
-
-        // Step 3: Get the updated invoice details to determine the new status
-        const [[updatedInvoice]] = await connection.query(
-            "SELECT due_amount, out_of_pocket_amount FROM Invoice WHERE invoice_id = ?",
-            [invoice_id]
-        );
-
-        // Step 4: Determine the new status based on the remaining due amount
-        let newStatus = 'Pending';
-        if (updatedInvoice.due_amount <= 0) {
+        const { invoice_id, paid_amount, payment_date, method_of_payment, status } = req.body;
+        await connection.query("INSERT INTO Payment (invoice_id, paid_amount, payment_date, method_of_payment, status) VALUES (?, ?, ?, ?, ?)", [invoice_id, paid_amount, payment_date, method_of_payment, status]);
+        
+        const [[invoice]] = await connection.query(`
+            SELECT total_amount, 
+                   (SELECT IFNULL(SUM(paid_amount), 0) FROM Payment WHERE invoice_id = ?) as total_paid 
+            FROM Invoice 
+            WHERE invoice_id = ?`, 
+            [invoice_id, invoice_id]);
+        
+        let newStatus = 'Partially Paid';
+        if (parseFloat(invoice.total_paid) >= parseFloat(invoice.total_amount)) {
             newStatus = 'Paid';
-        } else if (updatedInvoice.due_amount < updatedInvoice.out_of_pocket_amount) {
-            newStatus = 'Partially Paid';
         }
-
-        // Step 5: Update the invoice status
-        await connection.query(
-            "UPDATE Invoice SET status = ? WHERE invoice_id = ?",
-            [newStatus, invoice_id]
-        );
-
+        
+        await connection.query("UPDATE Invoice SET status = ? WHERE invoice_id = ?", [newStatus, invoice_id]);
         await connection.commit();
-        res.status(201).json({ message: "Payment recorded successfully" });
-
-    } catch (err) {
+        res.status(201).json({ message: "Payment recorded" });
+    } catch(err) { 
         await connection.rollback();
-        handleDatabaseError(res, err);
+        handleDatabaseError(res, err); 
     } finally {
         connection.release();
     }
 });
 
-// Registering remaining generic CRUD endpoints (Admin Only)
-
+// Registering remaining generic CRUD endpoints
+createCrudEndpoints('branches', 'Branch', 'branch_id');
 createCrudEndpoints('insurance-providers', 'Insurance_Provider', 'id');
 createCrudEndpoints('treatments', 'Treatment_Catalogue', 'service_code');
 createCrudEndpoints('specialties', 'Specialties', 'specialty_id');
@@ -828,7 +404,8 @@ app.get("/api/doctor/appointments/today", authorize(['doctor']), getDoctorInfoFr
 
 app.get("/api/doctor/appointments/upcoming", authorize(['doctor']), getDoctorInfoFromToken, async (req, res) => {
     try {
-        const query = `${APPOINTMENT_BASE_QUERY} WHERE a.doctor_id = ? AND DATE(a.schedule_date) > CURDATE() ORDER BY a.schedule_date ASC`;
+        // Show today's and future appointments (not past)
+        const query = `${APPOINTMENT_BASE_QUERY} WHERE a.doctor_id = ? AND DATE(a.schedule_date) >= CURDATE() ORDER BY a.schedule_date ASC`;
         const [rows] = await pool.query(query, [req.doctorId]);
         res.json(rows);
     } catch (err) { handleDatabaseError(res, err); }
@@ -856,17 +433,86 @@ app.put("/api/doctor/appointments/:appointmentId/status", authorize(['doctor']),
     try {
         const { status } = req.body;
         const { appointmentId } = req.params;
-        if (!status) { return res.status(400).json({ message: "Status is required." }); }
-        await pool.query("UPDATE Appointment SET status = ? WHERE appointment_id = ? AND doctor_id = ?", [status, appointmentId, req.doctorId]);
+
+        if (!status) {
+            return res.status(400).json({ message: "Status is required." });
+        }
+
+        // Get appointment details to validate
+        const [[appointment]] = await pool.query(
+            "SELECT schedule_date, status as current_status FROM Appointment WHERE appointment_id = ? AND doctor_id = ?",
+            [appointmentId, req.doctorId]
+        );
+
+        if (!appointment) {
+            return res.status(404).json({ message: "Appointment not found." });
+        }
+
+        // Business Rule: Cannot mark future appointments as completed
+        if (status === 'Completed') {
+            const appointmentDate = new Date(appointment.schedule_date);
+            const now = new Date();
+
+            if (appointmentDate > now) {
+                return res.status(400).json({
+                    message: "Cannot mark a future appointment as completed. The appointment must have already occurred.",
+                    code: "FUTURE_APPOINTMENT_ERROR"
+                });
+            }
+        }
+
+        // Update the status
+        await pool.query(
+            "UPDATE Appointment SET status = ? WHERE appointment_id = ? AND doctor_id = ?",
+            [status, appointmentId, req.doctorId]
+        );
+
         res.json({ message: "Status updated successfully." });
-    } catch (err) { handleDatabaseError(res, err); }
+    } catch (err) {
+        handleDatabaseError(res, err);
+    }
 });
 
 app.get("/api/doctor/stats", authorize(['doctor']), getDoctorInfoFromToken, async (req, res) => {
     try {
-        const [[todayStats]] = await pool.query(`SELECT COUNT(*) as total_appointments, SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) as completed, SUM(CASE WHEN status = 'Scheduled' THEN 1 ELSE 0 END) as scheduled FROM Appointment WHERE doctor_id = ? AND DATE(schedule_date) = CURDATE()`, [req.doctorId]);
-        const [[{ upcoming_week }]] = await pool.query(`SELECT COUNT(*) as upcoming_week FROM Appointment WHERE doctor_id = ? AND schedule_date BETWEEN CURDATE() + INTERVAL 1 DAY AND CURDATE() + INTERVAL 7 DAY`, [req.doctorId]);
-        res.json({ today: todayStats || { total_appointments: 0, completed: 0, scheduled: 0 }, upcoming_week: upcoming_week || 0 });
+        // Today's appointments stats
+        const [[todayStats]] = await pool.query(`
+            SELECT
+                COUNT(*) as total_appointments,
+                SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) as completed,
+                SUM(CASE WHEN status = 'Scheduled' THEN 1 ELSE 0 END) as scheduled
+            FROM Appointment
+            WHERE doctor_id = ? AND DATE(schedule_date) = CURDATE()
+        `, [req.doctorId]);
+
+        // Upcoming week appointments (tomorrow to 7 days out)
+        const [[{ upcoming_week }]] = await pool.query(`
+            SELECT COUNT(*) as upcoming_week
+            FROM Appointment
+            WHERE doctor_id = ?
+              AND schedule_date BETWEEN CURDATE() + INTERVAL 1 DAY AND CURDATE() + INTERVAL 7 DAY
+        `, [req.doctorId]);
+
+        // Total completed appointments (all time)
+        const [[{ total_completed }]] = await pool.query(`
+            SELECT COUNT(*) as total_completed
+            FROM Appointment
+            WHERE doctor_id = ? AND status = 'Completed'
+        `, [req.doctorId]);
+
+        // Total unique patients seen by this doctor
+        const [[{ total_patients }]] = await pool.query(`
+            SELECT COUNT(DISTINCT patient_id) as total_patients
+            FROM Appointment
+            WHERE doctor_id = ?
+        `, [req.doctorId]);
+
+        res.json({
+            today: todayStats || { total_appointments: 0, completed: 0, scheduled: 0 },
+            upcoming_week: upcoming_week || 0,
+            total_completed: total_completed || 0,
+            total_patients: total_patients || 0
+        });
     } catch (err) { handleDatabaseError(res, err); }
 });
 
@@ -884,6 +530,263 @@ app.get("/api/doctor/patients/:patientId/history", authorize(['doctor']), getDoc
         res.json(rows);
     } catch (err) { handleDatabaseError(res, err); }
 });
+
+// =========================================================================================
+// --- PHASE 2: CLINICAL DOCUMENTATION API ENDPOINTS ---
+// =========================================================================================
+
+// ============ TREATMENT CATALOGUE ENDPOINTS ============
+
+// GET all active treatments from catalogue
+app.get("/api/doctor/treatments/catalogue", authorize(['doctor']), async (req, res) => {
+    try {
+        const [rows] = await pool.query(`
+            SELECT service_code, name, description, price as base_price
+            FROM treatment_catalogue
+            ORDER BY name
+        `);
+        res.json(rows);
+    } catch (err) { handleDatabaseError(res, err); }
+});
+
+// GET treatments by name search (kept for compatibility)
+app.get("/api/doctor/treatments/catalogue/search", authorize(['doctor']), async (req, res) => {
+    try {
+        const { query } = req.query;
+        const [rows] = await pool.query(`
+            SELECT service_code, name, description, price as base_price
+            FROM treatment_catalogue
+            WHERE name LIKE ? OR description LIKE ?
+            ORDER BY name
+        `, [`%${query}%`, `%${query}%`]);
+        res.json(rows);
+    } catch (err) { handleDatabaseError(res, err); }
+});
+
+// GET treatment by service code
+app.get("/api/doctor/treatments/catalogue/:serviceCode", authorize(['doctor']), async (req, res) => {
+    try {
+        const [[row]] = await pool.query(`
+            SELECT service_code, name, description, price as base_price
+            FROM treatment_catalogue
+            WHERE service_code = ?
+        `, [req.params.serviceCode]);
+
+        if (!row) {
+            return res.status(404).json({ message: 'Treatment not found' });
+        }
+        res.json(row);
+    } catch (err) { handleDatabaseError(res, err); }
+});
+
+// ============ TREATMENT RECORDING ENDPOINTS (REQ-4.4.1) ============
+
+// GET treatments for a specific appointment
+app.get("/api/doctor/appointments/:appointmentId/treatments", authorize(['doctor']), getDoctorInfoFromToken, async (req, res) => {
+    try {
+        const { appointmentId } = req.params;
+
+        // Verify appointment belongs to this doctor
+        const [[appointment]] = await pool.query(
+            'SELECT status FROM appointment WHERE appointment_id = ? AND doctor_id = ?',
+            [appointmentId, req.doctorId]
+        );
+
+        if (!appointment) {
+            return res.status(404).json({ message: 'Appointment not found or not assigned to you.' });
+        }
+
+        // Get treatments for this appointment
+        const [treatments] = await pool.query(`
+            SELECT at.service_code, tc.name, tc.description, at.actual_price, at.notes
+            FROM appointment_treatment at
+            JOIN treatment_catalogue tc ON at.service_code = tc.service_code
+            WHERE at.appointment_id = ?
+        `, [appointmentId]);
+
+        res.json({ appointment_status: appointment.status, treatments });
+    } catch (err) { handleDatabaseError(res, err); }
+});
+
+// POST - Add treatment to appointment (CRITICAL BUSINESS RULE: Only for completed appointments)
+app.post("/api/doctor/appointments/:appointmentId/treatments", authorize(['doctor']), getDoctorInfoFromToken, async (req, res) => {
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        const { appointmentId } = req.params;
+        const { service_code, actual_price, notes } = req.body;
+
+        // CRITICAL CHECK: Verify appointment is completed
+        const [[appointment]] = await connection.query(
+            'SELECT status FROM appointment WHERE appointment_id = ? AND doctor_id = ?',
+            [appointmentId, req.doctorId]
+        );
+
+        if (!appointment) {
+            await connection.rollback();
+            return res.status(404).json({ message: 'Appointment not found or not assigned to you.' });
+        }
+
+        // REQ-4.4.1: Can only add treatments to completed appointments
+        if (appointment.status !== 'Completed') {
+            await connection.rollback();
+            return res.status(400).json({
+                message: 'Treatments can only be added to completed appointments. Please mark the appointment as completed first.',
+                requirement: 'REQ-4.4.1'
+            });
+        }
+
+        // Verify service_code exists in catalogue
+        const [[treatment]] = await connection.query(
+            'SELECT price FROM treatment_catalogue WHERE service_code = ?',
+            [service_code]
+        );
+
+        if (!treatment) {
+            await connection.rollback();
+            return res.status(400).json({ message: 'Invalid service code.' });
+        }
+
+        // Use actual_price if provided, otherwise use catalogue price
+        const finalPrice = actual_price || treatment.price;
+
+        // Insert treatment
+        await connection.query(
+            `INSERT INTO appointment_treatment (appointment_id, service_code, notes, actual_price)
+             VALUES (?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE notes = VALUES(notes), actual_price = VALUES(actual_price)`,
+            [appointmentId, service_code, notes, finalPrice]
+        );
+
+        await connection.commit();
+        res.status(201).json({ message: 'Treatment added successfully' });
+
+    } catch (err) {
+        await connection.rollback();
+        handleDatabaseError(res, err);
+    } finally {
+        connection.release();
+    }
+});
+
+// DELETE - Remove treatment from appointment
+app.delete("/api/doctor/appointments/:appointmentId/treatments/:serviceCode", authorize(['doctor']), getDoctorInfoFromToken, async (req, res) => {
+    try {
+        const { appointmentId, serviceCode } = req.params;
+
+        // Verify appointment belongs to doctor
+        const [[appointment]] = await pool.query(
+            'SELECT appointment_id FROM appointment WHERE appointment_id = ? AND doctor_id = ?',
+            [appointmentId, req.doctorId]
+        );
+
+        if (!appointment) {
+            return res.status(404).json({ message: 'Appointment not found.' });
+        }
+
+        await pool.query(
+            'DELETE FROM appointment_treatment WHERE appointment_id = ? AND service_code = ?',
+            [appointmentId, serviceCode]
+        );
+
+        res.status(204).send();
+    } catch (err) { handleDatabaseError(res, err); }
+});
+
+// ============ CONSULTATION NOTES ENDPOINTS (AUTO-SAVE SUPPORT) ============
+
+// GET consultation notes for appointment
+app.get("/api/doctor/appointments/:appointmentId/notes", authorize(['doctor']), getDoctorInfoFromToken, async (req, res) => {
+    try {
+        const { appointmentId } = req.params;
+
+        const [[appointment]] = await pool.query(
+            'SELECT consultation_notes, status FROM appointment WHERE appointment_id = ? AND doctor_id = ?',
+            [appointmentId, req.doctorId]
+        );
+
+        if (!appointment) {
+            return res.status(404).json({ message: 'Appointment not found.' });
+        }
+
+        res.json({
+            consultation_notes: appointment.consultation_notes,
+            status: appointment.status,
+            can_edit: true  // Doctors can always edit notes
+        });
+    } catch (err) { handleDatabaseError(res, err); }
+});
+
+// PUT - Update consultation notes (supports auto-save)
+app.put("/api/doctor/appointments/:appointmentId/notes", authorize(['doctor']), getDoctorInfoFromToken, async (req, res) => {
+    try {
+        const { appointmentId } = req.params;
+        const { consultation_notes } = req.body;
+
+        // Verify appointment belongs to doctor
+        const [[appointment]] = await pool.query(
+            'SELECT status FROM appointment WHERE appointment_id = ? AND doctor_id = ?',
+            [appointmentId, req.doctorId]
+        );
+
+        if (!appointment) {
+            return res.status(404).json({ message: 'Appointment not found.' });
+        }
+
+        // Update notes
+        await pool.query(
+            'UPDATE appointment SET consultation_notes = ? WHERE appointment_id = ?',
+            [consultation_notes, appointmentId]
+        );
+
+        res.json({
+            message: 'Notes saved successfully',
+            saved_at: new Date().toISOString()
+        });
+
+    } catch (err) { handleDatabaseError(res, err); }
+});
+
+// ============ MEDICAL HISTORY ENDPOINTS ============
+
+// GET patient medical history (allergies, medications, history)
+app.get("/api/doctor/patients/:patientId/medical-history", authorize(['doctor']), getDoctorInfoFromToken, async (req, res) => {
+    try {
+        const { patientId } = req.params;
+
+        const [[patient]] = await pool.query(`
+            SELECT medical_history, allergies, current_medications
+            FROM patient WHERE patient_id = ?
+        `, [patientId]);
+
+        if (!patient) {
+            return res.status(404).json({ message: 'Patient not found.' });
+        }
+
+        res.json(patient);
+    } catch (err) { handleDatabaseError(res, err); }
+});
+
+// UPDATE patient medical history (doctors can update)
+app.put("/api/doctor/patients/:patientId/medical-history", authorize(['doctor']), getDoctorInfoFromToken, async (req, res) => {
+    try {
+        const { patientId } = req.params;
+        const { medical_history, allergies, current_medications } = req.body;
+
+        await pool.query(`
+            UPDATE patient
+            SET medical_history = ?, allergies = ?, current_medications = ?
+            WHERE patient_id = ?
+        `, [medical_history, allergies, current_medications, patientId]);
+
+        res.json({ message: 'Medical history updated successfully' });
+    } catch (err) { handleDatabaseError(res, err); }
+});
+
+// =========================================================================================
+// --- END OF PHASE 2 CLINICAL DOCUMENTATION API ---
+// =========================================================================================
 
 // Branch CRUD (Admin only)
 app.get("/api/branches", authorize(['admin']), async (req, res) => {
@@ -1353,4 +1256,3 @@ app.put("/api/branch-manager/staff/:id", authorize(['branch manager']), getBranc
 app.listen(PORT, () => {
     console.log(`🚀 Server is running on http://localhost:${PORT}`);
 });
-
