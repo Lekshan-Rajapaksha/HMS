@@ -3,6 +3,9 @@
 const express = require("express");
 const mysql = require("mysql2/promise");
 const cors = require("cors");
+const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
+require("dotenv").config();
 
 // Import Phase 1 middleware
 const auditLogger = require('./middleware/auditLogger');
@@ -11,12 +14,15 @@ const { sessionManager, createSession, destroySession } = require('./middleware/
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// JWT Secret for token signing (Phase 1 Security)
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+
 // --- DATABASE CONFIGURATION ---
 const dbConfig = {
-    host: "localhost",
-    user: "root",
-    password: "Lekshan123@", // ⚠️ Replace with your MySQL password
-    database: "hospital_managment", // Replace with your database name if different
+    host: process.env.DB_HOST || "localhost",
+    user: process.env.DB_USER || "root",
+    password: process.env.DB_PASSWORD || "Lekshan123@",
+    database: process.env.DB_NAME || "hospital_managment",
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0,
@@ -24,9 +30,16 @@ const dbConfig = {
 
 const pool = mysql.createPool(dbConfig);
 
+// Export pool for use in middleware
+module.exports = { pool };
+
 // --- MIDDLEWARE ---
 app.use(cors());
 app.use(express.json());
+
+// Serve static frontend files
+const path = require('path');
+app.use(express.static(path.join(__dirname, '../frontend')));
 
 // Apply Phase 1 Security Middleware
 app.use(auditLogger(pool)); // Logs all doctor actions to audit_log
@@ -38,9 +51,6 @@ const handleDatabaseError = (res, err) => {
     res.status(500).json({ error: "An internal server error occurred." });
 };
 
-<<<<<<< Updated upstream
-// --- GENERIC CRUD Endpoints ---
-=======
 // --- AUTHENTICATION & AUTHORIZATION ---
 
 // Authorization Middleware
@@ -133,7 +143,6 @@ app.post("/api/logout", authorize(['admin', 'doctor', 'receptionist', 'branch ma
 });
 
 // --- GENERIC CRUD Endpoints (Protected for Admins) ---
->>>>>>> Stashed changes
 const createCrudEndpoints = (entityName, tableName, idColumn) => {
     const endpoint = `/api/${entityName}`;
     app.get(endpoint, async (req, res) => {
@@ -351,8 +360,6 @@ createCrudEndpoints('insurance-providers', 'Insurance_Provider', 'id');
 createCrudEndpoints('treatments', 'Treatment_Catalogue', 'service_code');
 createCrudEndpoints('specialties', 'Specialties', 'specialty_id');
 
-<<<<<<< Updated upstream
-=======
 // =========================================================================================
 // --- DOCTOR-SPECIFIC API Endpoints ---
 const getDoctorInfoFromToken = async (req, res, next) => {
@@ -397,7 +404,8 @@ app.get("/api/doctor/appointments/today", authorize(['doctor']), getDoctorInfoFr
 
 app.get("/api/doctor/appointments/upcoming", authorize(['doctor']), getDoctorInfoFromToken, async (req, res) => {
     try {
-        const query = `${APPOINTMENT_BASE_QUERY} WHERE a.doctor_id = ? AND DATE(a.schedule_date) > CURDATE() ORDER BY a.schedule_date ASC`;
+        // Show today's and future appointments (not past)
+        const query = `${APPOINTMENT_BASE_QUERY} WHERE a.doctor_id = ? AND DATE(a.schedule_date) >= CURDATE() ORDER BY a.schedule_date ASC`;
         const [rows] = await pool.query(query, [req.doctorId]);
         res.json(rows);
     } catch (err) { handleDatabaseError(res, err); }
@@ -425,17 +433,86 @@ app.put("/api/doctor/appointments/:appointmentId/status", authorize(['doctor']),
     try {
         const { status } = req.body;
         const { appointmentId } = req.params;
-        if (!status) { return res.status(400).json({ message: "Status is required." }); }
-        await pool.query("UPDATE Appointment SET status = ? WHERE appointment_id = ? AND doctor_id = ?", [status, appointmentId, req.doctorId]);
+
+        if (!status) {
+            return res.status(400).json({ message: "Status is required." });
+        }
+
+        // Get appointment details to validate
+        const [[appointment]] = await pool.query(
+            "SELECT schedule_date, status as current_status FROM Appointment WHERE appointment_id = ? AND doctor_id = ?",
+            [appointmentId, req.doctorId]
+        );
+
+        if (!appointment) {
+            return res.status(404).json({ message: "Appointment not found." });
+        }
+
+        // Business Rule: Cannot mark future appointments as completed
+        if (status === 'Completed') {
+            const appointmentDate = new Date(appointment.schedule_date);
+            const now = new Date();
+
+            if (appointmentDate > now) {
+                return res.status(400).json({
+                    message: "Cannot mark a future appointment as completed. The appointment must have already occurred.",
+                    code: "FUTURE_APPOINTMENT_ERROR"
+                });
+            }
+        }
+
+        // Update the status
+        await pool.query(
+            "UPDATE Appointment SET status = ? WHERE appointment_id = ? AND doctor_id = ?",
+            [status, appointmentId, req.doctorId]
+        );
+
         res.json({ message: "Status updated successfully." });
-    } catch (err) { handleDatabaseError(res, err); }
+    } catch (err) {
+        handleDatabaseError(res, err);
+    }
 });
 
 app.get("/api/doctor/stats", authorize(['doctor']), getDoctorInfoFromToken, async (req, res) => {
     try {
-        const [[todayStats]] = await pool.query(`SELECT COUNT(*) as total_appointments, SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) as completed, SUM(CASE WHEN status = 'Scheduled' THEN 1 ELSE 0 END) as scheduled FROM Appointment WHERE doctor_id = ? AND DATE(schedule_date) = CURDATE()`, [req.doctorId]);
-        const [[{ upcoming_week }]] = await pool.query(`SELECT COUNT(*) as upcoming_week FROM Appointment WHERE doctor_id = ? AND schedule_date BETWEEN CURDATE() + INTERVAL 1 DAY AND CURDATE() + INTERVAL 7 DAY`, [req.doctorId]);
-        res.json({ today: todayStats || { total_appointments: 0, completed: 0, scheduled: 0 }, upcoming_week: upcoming_week || 0 });
+        // Today's appointments stats
+        const [[todayStats]] = await pool.query(`
+            SELECT
+                COUNT(*) as total_appointments,
+                SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) as completed,
+                SUM(CASE WHEN status = 'Scheduled' THEN 1 ELSE 0 END) as scheduled
+            FROM Appointment
+            WHERE doctor_id = ? AND DATE(schedule_date) = CURDATE()
+        `, [req.doctorId]);
+
+        // Upcoming week appointments (tomorrow to 7 days out)
+        const [[{ upcoming_week }]] = await pool.query(`
+            SELECT COUNT(*) as upcoming_week
+            FROM Appointment
+            WHERE doctor_id = ?
+              AND schedule_date BETWEEN CURDATE() + INTERVAL 1 DAY AND CURDATE() + INTERVAL 7 DAY
+        `, [req.doctorId]);
+
+        // Total completed appointments (all time)
+        const [[{ total_completed }]] = await pool.query(`
+            SELECT COUNT(*) as total_completed
+            FROM Appointment
+            WHERE doctor_id = ? AND status = 'Completed'
+        `, [req.doctorId]);
+
+        // Total unique patients seen by this doctor
+        const [[{ total_patients }]] = await pool.query(`
+            SELECT COUNT(DISTINCT patient_id) as total_patients
+            FROM Appointment
+            WHERE doctor_id = ?
+        `, [req.doctorId]);
+
+        res.json({
+            today: todayStats || { total_appointments: 0, completed: 0, scheduled: 0 },
+            upcoming_week: upcoming_week || 0,
+            total_completed: total_completed || 0,
+            total_patients: total_patients || 0
+        });
     } catch (err) { handleDatabaseError(res, err); }
 });
 
@@ -1158,7 +1235,6 @@ app.delete("/api/branch-manager/appointments/:id", authorize(['branch manager'])
 
 // =========================================================================================
 
->>>>>>> Stashed changes
 app.listen(PORT, () => {
     console.log(`🚀 Server is running on http://localhost:${PORT}`);
 });
