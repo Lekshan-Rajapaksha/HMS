@@ -140,11 +140,11 @@ function extractTableFromPath(path) {
  */
 function extractRecordId(req) {
   return req.params.id ||
-    req.params.appointmentId ||
-    req.params.patientId ||
-    req.params.serviceCode ||
-    (req.body && req.body.appointment_id) ||
-    null;
+         req.params.appointmentId ||
+         req.params.patientId ||
+         req.params.serviceCode ||
+         (req.body && req.body.appointment_id) ||
+         null;
 }
 
 module.exports = auditLogger;
