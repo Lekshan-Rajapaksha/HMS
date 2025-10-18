@@ -928,58 +928,7 @@ const getBranchInfoFromToken = async (req, res, next) => {
         handleDatabaseError(res, err);
     }
 };
-// GET single staff member details for editing
-app.get("/api/branch-manager/staff/:id", authorize(['branch manager']), getBranchInfoFromToken, async (req, res) => {
-    try {
-        const { branchId } = req;
-        const staffId = req.params.id;
 
-        const [rows] = await pool.query(`
-            SELECT s.staff_id, s.name, s.contact_info, s.is_medical_staff, r.name as role_name 
-            FROM Staff s 
-            JOIN Account_Info ai ON s.user_id = ai.user_id 
-            JOIN Role r ON ai.role_id = r.role_id 
-            WHERE s.staff_id = ? AND s.branch_id = ?
-        `, [staffId, branchId]);
-
-        if (rows.length === 0) {
-            return res.status(404).json({ message: "Staff member not found in your branch." });
-        }
-
-        res.json(rows[0]);
-    } catch (err) {
-        handleDatabaseError(res, err);
-    }
-});
-
-// PUT (update) staff member - only name and contact info
-app.put("/api/branch-manager/staff/:id", authorize(['branch manager']), getBranchInfoFromToken, async (req, res) => {
-    try {
-        const { branchId } = req;
-        const staffId = req.params.id;
-        const { name, contact_info } = req.body;
-
-        // Verify the staff belongs to this branch
-        const [[staff]] = await pool.query(
-            "SELECT staff_id FROM Staff WHERE staff_id = ? AND branch_id = ?",
-            [staffId, branchId]
-        );
-
-        if (!staff) {
-            return res.status(404).json({ message: "Staff member not found in your branch." });
-        }
-
-        // Only allow updating name and contact_info
-        await pool.query(
-            "UPDATE Staff SET name = ?, contact_info = ? WHERE staff_id = ?",
-            [name, contact_info, staffId]
-        );
-
-        res.status(200).json({ message: "Staff member updated successfully." });
-    } catch (err) {
-        handleDatabaseError(res, err);
-    }
-});
 // GET the profile information for the logged-in manager
 app.get("/api/branch-manager/profile", authorize(['branch manager']), getBranchInfoFromToken, async (req, res) => {
     try {
@@ -1067,11 +1016,20 @@ app.get("/api/branch-manager/staff", authorize(['branch manager']), getBranchInf
     try {
         const { branchId } = req;
         const [rows] = await pool.query(`
-            SELECT s.staff_id, s.name, s.contact_info, s.is_medical_staff, r.name as role_name 
+            SELECT 
+                s.staff_id, 
+                s.name, 
+                s.contact_info, 
+                s.is_medical_staff, 
+                r.name as role_name,
+                sp.name as specialty_name
             FROM Staff s 
             JOIN Account_Info ai ON s.user_id = ai.user_id 
             JOIN Role r ON ai.role_id = r.role_id 
-            WHERE s.branch_id = ? and  r.name != 'Branch Manager'
+            LEFT JOIN Doctor d ON s.staff_id = d.staff_id
+            LEFT JOIN doctor_specialties ds ON d.doctor_id = ds.doctor_id
+            LEFT JOIN Specialties sp ON ds.specialty_id = sp.specialty_id
+            WHERE s.branch_id = ? AND r.name NOT IN ('Branch Manager','Admin')
             ORDER BY s.name ASC
         `, [branchId]);
         res.json(rows);
@@ -1228,6 +1186,66 @@ app.delete("/api/branch-manager/appointments/:id", authorize(['branch manager'])
     }
 });
 
+app.get("/api/branch-manager/staff/:id", authorize(['branch manager']), getBranchInfoFromToken, async (req, res) => {
+    try {
+        const { branchId } = req;
+        const staffId = req.params.id;
+
+        const [rows] = await pool.query(`
+            SELECT 
+                s.staff_id, 
+                s.name, 
+                s.contact_info, 
+                s.is_medical_staff, 
+                r.name as role_name,
+                sp.name as specialty_name
+            FROM Staff s 
+            JOIN Account_Info ai ON s.user_id = ai.user_id 
+            JOIN Role r ON ai.role_id = r.role_id 
+            LEFT JOIN Doctor d ON s.staff_id = d.staff_id
+            LEFT JOIN doctor_specialties ds ON d.doctor_id = ds.doctor_id
+            LEFT JOIN Specialties sp ON ds.specialty_id = sp.specialty_id
+            WHERE s.staff_id = ? AND s.branch_id = ?
+        `, [staffId, branchId]);
+
+        if (rows.length === 0) {
+            return res.status(404).json({ message: "Staff member not found in your branch." });
+        }
+
+        res.json(rows[0]);
+    } catch (err) {
+        handleDatabaseError(res, err);
+    }
+});
+
+// PUT (update) staff member - only name and contact info
+app.put("/api/branch-manager/staff/:id", authorize(['branch manager']), getBranchInfoFromToken, async (req, res) => {
+    try {
+        const { branchId } = req;
+        const staffId = req.params.id;
+        const { name, contact_info } = req.body;
+
+        // Verify the staff belongs to this branch
+        const [[staff]] = await pool.query(
+            "SELECT staff_id FROM Staff WHERE staff_id = ? AND branch_id = ?",
+            [staffId, branchId]
+        );
+
+        if (!staff) {
+            return res.status(404).json({ message: "Staff member not found in your branch." });
+        }
+
+        // Only allow updating name and contact_info
+        await pool.query(
+            "UPDATE Staff SET name = ?, contact_info = ? WHERE staff_id = ?",
+            [name, contact_info, staffId]
+        );
+
+        res.status(200).json({ message: "Staff member updated successfully." });
+    } catch (err) {
+        handleDatabaseError(res, err);
+    }
+});
 // Note: For Patients, we are not filtering by branch as the schema doesn't link them directly.
 // A manager can manage all patients, similar to a receptionist.
 // We also reuse the existing POST/PUT/DELETE endpoints for appointments and patients,
