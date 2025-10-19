@@ -1,301 +1,223 @@
 // doctor-appointments.js
+const API_BASE_URL = "http://localhost:3000";
+const authToken = localStorage.getItem('clinicProToken');
+if (!authToken) window.location.href = '/login.html';
 
 document.addEventListener("DOMContentLoaded", () => {
-    const API_BASE_URL = "http://localhost:3000";
-
-    // --- NEW: Secure Token Authentication ---
-    const authToken = localStorage.getItem('clinicProToken');
-    if (!authToken) {
-        // If no token exists, redirect to the login page immediately.
-        window.location.href = '/login.html';
-        return; // Stop the rest of the script from running
-    }
-
+    // Element & Modal Selection
     const appointmentListContainer = document.getElementById("appointment-list-container");
     const patientInfoContainer = document.getElementById("patient-info-container");
-    const todayBtn = document.getElementById("btn-today");
-    const upcomingBtn = document.getElementById("btn-upcoming");
-    const customBtn = document.getElementById("btn-custom");
-    const dateRangeContainer = document.getElementById("date-range-container");
-    const startDateInput = document.getElementById("start-date");
-    const endDateInput = document.getElementById("end-date");
-    const applyDateRangeBtn = document.getElementById("apply-date-range");
-    const searchInput = document.getElementById("search-input");
-    const searchBtn = document.getElementById("search-btn");
     const toastContainer = document.querySelector(".toast-container");
-
-    const patientModal = new bootstrap.Modal(document.getElementById("patientModal"));
     const historyModal = new bootstrap.Modal(document.getElementById("historyModal"));
-    const patientModalBody = document.getElementById("patientModalBody");
     const historyModalBody = document.getElementById("historyModalBody");
-    const viewHistoryBtn = document.getElementById("view-history-btn");
+    const completionModal = new bootstrap.Modal(document.getElementById("completionModal"));
+    const completionForm = document.getElementById("completion-form");
 
-    const todayTotalEl = document.getElementById("today-total");
-    const todayCompletedEl = document.getElementById("today-completed");
-    const todayScheduledEl = document.getElementById("today-scheduled");
-    const upcomingWeekEl = document.getElementById("upcoming-week");
-
-    let currentAppointments = [];
-    let selectedAppointmentId = null;
-    let selectedPatientId = null;
-    let currentView = 'today';
+    // State
+    let currentAppointments = [], treatmentCatalogue = [], prescribedTreatments = [], selectedAppointment = null;
 
     // --- HELPER FUNCTIONS ---
     const showToast = (message, type = 'success') => {
-        const toastId = 'toast-' + Math.random().toString(36).substring(2, 9);
+        const toastId = `toast-${Date.now()}`;
         const icon = type === 'success' ? 'check-circle-fill' : 'exclamation-triangle-fill';
-        const toastHTML = `
-            <div id="${toastId}" class="toast align-items-center text-bg-${type} border-0" role="alert" aria-live="assertive" aria-atomic="true">
-                <div class="d-flex">
-                    <div class="toast-body"><i class="bi bi-${icon} me-2"></i>${message}</div>
-                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
-                </div>
-            </div>`;
-        toastContainer.insertAdjacentHTML('beforeend', toastHTML);
+        toastContainer.insertAdjacentHTML('beforeend', `<div id="${toastId}" class="toast align-items-center text-bg-${type} border-0" role="alert"><div class="d-flex"><div class="toast-body"><i class="bi bi-${icon} me-2"></i>${message}</div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button></div></div>`);
         const toastEl = document.getElementById(toastId);
-        const toast = new bootstrap.Toast(toastEl, { delay: 4000 });
+        const toast = new bootstrap.Toast(document.getElementById(toastId), { delay: 4000 });
         toast.show();
-        toastEl.addEventListener('hidden.bs.toast', () => toastEl.remove());
+        document.getElementById(toastId).addEventListener('hidden.bs.toast', e => e.target.remove());
     };
 
-    // --- NEW: Centralized Authorized Fetch Function ---
     const authorizedFetch = async (endpoint, options = {}) => {
-        const defaultHeaders = {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${authToken}`
-        };
-        const mergedOptions = {
-            ...options,
-            headers: { ...defaultHeaders, ...options.headers }
-        };
-
+        const defaultOptions = { headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` } };
+        const mergedOptions = { ...defaultOptions, ...options, headers: { ...defaultOptions.headers, ...options.headers } };
         try {
             const response = await fetch(`${API_BASE_URL}${endpoint}`, mergedOptions);
-            if (response.status === 401 || response.status === 403) {
-                localStorage.removeItem('clinicProToken');
-                window.location.href = '/login.html';
-                return null;
-            }
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
-            }
-            if (response.status === 204) { // Handle No Content response
-                return null;
-            }
-            return await response.json();
-        } catch (error) {
-            console.error("Fetch error:", error);
-            showToast(error.message, 'danger');
-            throw error; // Re-throw the error to be caught by the calling function
-        }
-    };
-
-    // --- UPDATED: Simplified Data Fetching Logic ---
-    const updateAppointmentStatus = async (appointmentId, status) => {
-        try {
-            await authorizedFetch(`/api/doctor/appointments/${appointmentId}/status`, {
-                method: 'PUT',
-                body: JSON.stringify({ status }),
-            });
-            showToast("Appointment status updated successfully.");
-            loadCurrentView();
-            loadStatistics();
-        } catch (error) {
-            // Error is already shown by authorizedFetch
-        }
-    };
-
-    const searchAppointments = async (query, startDate, endDate) => {
-        try {
-            const params = new URLSearchParams();
-            if (query) params.append('query', query);
-            if (startDate) params.append('startDate', startDate);
-            if (endDate) params.append('endDate', endDate);
-            
-            const endpoint = `/api/doctor/appointments/search?${params.toString()}`;
-            const appointments = await authorizedFetch(endpoint);
-
-            if (appointments) {
-                currentAppointments = appointments;
-                renderAppointments(appointments);
-                currentView = 'search';
-            }
-        } catch (error) {
-            appointmentListContainer.innerHTML = `<div class="alert alert-danger">${error.message}</div>`;
-        }
+            if ([401, 403].includes(response.status)) { localStorage.removeItem('clinicProToken'); window.location.href = '/login.html'; return null; }
+            if (!response.ok) { const err = await response.json(); throw new Error(err.message || `HTTP error! status: ${response.status}`); }
+            return response.status === 204 ? null : response.json();
+        } catch (error) { showToast(error.message, 'danger'); return null; }
     };
 
     // --- RENDER FUNCTIONS ---
-    const renderSpinner = (container) => {
-        container.innerHTML = `
-            <div class="d-flex justify-content-center p-5">
-                <div class="spinner-border text-primary" role="status">
-                    <span class="visually-hidden">Loading...</span>
-                </div>
-            </div>`;
-    };
+    const renderSpinner = container => container.innerHTML = `<div class="d-flex justify-content-center p-5"><div class="spinner-border text-primary"></div></div>`;
+    const renderInitialPatientView = () => patientInfoContainer.innerHTML = `<div class="card patient-info-widget"><div class="card-body text-center p-5"><i class="bi bi-person-circle fs-1 text-muted"></i><p class="mt-3 text-muted">Select an appointment to view patient details.</p></div></div>`;
 
     const renderAppointments = (appointments) => {
         if (!appointments || appointments.length === 0) {
             appointmentListContainer.innerHTML = `<div class="text-center p-5 text-muted">No appointments found.</div>`;
-            return;
+            renderInitialPatientView(); return;
         }
-        appointmentListContainer.innerHTML = appointments.map(appt => `
-            <div class="appointment-item d-flex justify-content-between align-items-center p-3 border rounded mb-2"
-                 data-appointment-id="${appt.appointment_id}"
-                 data-patient-id="${appt.patient_id}"
-                 style="cursor: pointer; transition: all 0.2s;">
-                <div class="flex-grow-1">
-                    <div class="d-flex justify-content-between align-items-start mb-2">
-                        <h6 class="mb-1 fw-bold">${appt.patient_name}</h6>
-                        <span class="status-badge status-${appt.status}">${appt.status}</span>
-                    </div>
-                    <div class="row text-muted small">
-                        <div class="col-sm-6"><i class="bi bi-clock me-1"></i>${new Date(appt.schedule_date).toLocaleString()}</div>
-                        <div class="col-sm-6"><i class="bi bi-person me-1"></i>Age: ${appt.patient_age}</div>
-                    </div>
-                    <div class="row text-muted small mt-1">
-                        <div class="col-sm-6"><i class="bi bi-telephone me-1"></i>${appt.patient_contact || 'N/A'}</div>
-                        <div class="col-sm-6"><i class="bi bi-shield-check me-1"></i>${appt.insurance_provider || 'No Insurance'}</div>
-                    </div>
-                </div>
-                <div class="ms-3">
-                    <div class="d-flex flex-column gap-1">
-                        <button class="btn btn-sm btn-outline-primary view-patient-btn"><i class="bi bi-eye"></i></button>
-                        ${(appt.status === 'Scheduled' || appt.status === 'Rescheduled') ? `<button class="btn btn-sm btn-success complete-btn"><i class="bi bi-check"></i></button>` : ''}
-                    </div>
-                </div>
-            </div>`).join('');
+        appointmentListContainer.innerHTML = appointments.map(appt => {
+            const time = new Date(appt.schedule_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            return `<div class="appointment-item status-${(appt.status || 'scheduled').toLowerCase()}" data-appointment-id="${appt.appointment_id}">
+                <div class="time-slot"><div class="time">${time}</div><div class="duration">30 min</div></div>
+                <div class="patient-details"><div class="fw-bold">${appt.patient_name}</div><div class="small text-muted">Age: ${appt.patient_age} | ${appt.insurance_provider || 'No Insurance'}</div></div>
+                <i class="bi bi-chevron-right text-muted ms-auto"></i>
+            </div>`;
+        }).join('');
+
+        const firstApptId = appointments[0].appointment_id;
+        document.querySelector(`.appointment-item[data-appointment-id="${firstApptId}"]`).classList.add('active');
+        selectedAppointment = appointments.find(a => a.appointment_id == firstApptId);
+        renderPatientDetails(selectedAppointment);
     };
 
-    const renderPatientDetails = (appointment) => {
-        const hasInsurance = appointment.insurance_provider ? 'Yes' : 'No';
+    const renderPatientDetails = (appt) => {
+        if (!appt) { renderInitialPatientView(); return; }
+        const apptDate = new Date(appt.schedule_date);
         patientInfoContainer.innerHTML = `
-            <div class="card">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <div><i class="bi bi-person-fill me-2"></i>Selected Patient</div>
-                </div>
+            <div class="card patient-info-widget">
                 <div class="card-body">
-                    <h5 class="card-title">${appointment.patient_name}</h5>
-                    <ul class="list-group list-group-flush">
-                        <li class="list-group-item d-flex justify-content-between"><strong>Age:</strong> <span>${appointment.patient_age}</span></li>
-                        <li class="list-group-item d-flex justify-content-between"><strong>Contact:</strong> <span>${appointment.patient_contact || 'N/A'}</span></li>
-                        <li class="list-group-item d-flex justify-content-between"><strong>Insurance:</strong> <span>${hasInsurance}</span></li>
-                        <li class="list-group-item d-flex justify-content-between"><strong>Provider:</strong> <span>${appointment.insurance_provider || 'N/A'}</span></li>
-                        <li class="list-group-item d-flex justify-content-between"><strong>Appointment:</strong><span>${new Date(appointment.schedule_date).toLocaleString()}</span></li>
-                        <li class="list-group-item d-flex justify-content-between"><strong>Status:</strong><span class="status-badge status-${appointment.status}">${appointment.status}</span></li>
+                    <div class="text-center pb-4 mb-4 border-bottom">
+                        <div class="patient-avatar">${appt.patient_name.match(/\b(\w)/g).join('').substring(0, 2)}</div>
+                        <h5 class="mt-3">${appt.patient_name}</h5>
+                        <p class="text-muted mb-0">Apt ID: #${appt.appointment_id}</p>
+                    </div>
+                    <ul class="patient-info-list">
+                        <li><i class="bi bi-person"></i> <div><strong>Gender:</strong> ${appt.patient_gender || 'N/A'}</div></li>
+                        <li><i class="bi bi-cake2"></i> <div><strong>Age:</strong> ${appt.patient_age} years</div></li>
+                        <li><i class="bi bi-telephone"></i> <div><strong>Contact:</strong> ${appt.patient_contact || 'N/A'}</div></li>
+                        <li><i class="bi bi-shield-check"></i> <div><strong>Insurance:</strong> ${appt.insurance_provider || 'No Insurance'}</div></li>
+                        <li><i class="bi bi-calendar-event"></i> <div><strong>Appointment:</strong> ${apptDate.toLocaleString()}</div></li>
                     </ul>
-                    ${(appointment.status === 'Scheduled' || appointment.status === 'Rescheduled') ? `<div class="mt-3"><button class="btn btn-success w-100" onclick="updateAppointmentStatus(${appointment.appointment_id}, 'Completed')"><i class="bi bi-check-circle me-2"></i>Mark as Completed</button></div>` : ''}
+                    <div class="d-grid gap-2 mt-4">
+                        ${['Scheduled', 'Rescheduled'].includes(appt.status) ? `<button class="btn btn-success" data-action="complete"><i class="bi bi-check-circle me-2"></i>Complete Appointment</button>` : `<div class="alert alert-success text-center">Appointment Completed</div>`}
+                        <button class="btn btn-outline-secondary" data-action="view-history"><i class="bi bi-clock-history me-2"></i>View Patient History</button>
+                    </div>
                 </div>
             </div>`;
     };
-    
-    const renderInitialPatientView=()=>{patientInfoContainer.innerHTML=`<div class="card"><div class="card-body text-center p-5"><i class="bi bi-person-circle fs-1 text-muted"></i><p class="mt-3 text-muted">Select an appointment to view patient details.</p></div></div>`};const renderPatientModal=(e)=>{const t=e.emergency_contact||"Not provided",o=e.insurance_provider_name||"No insurance",a=e.policy_number||"N/A";patientModalBody.innerHTML=`<div class="row"><div class="col-md-6"><h6 class="text-muted mb-3">Personal Information</h6><table class="table table-borderless"><tbody><tr><td><strong>Full Name:</strong></td><td>${e.name}</td></tr><tr><td><strong>Gender:</strong></td><td>${e.gender||"Not specified"}</td></tr><tr><td><strong>Date of Birth:</strong></td><td>${new Date(e.date_of_birth).toLocaleDateString()}</td></tr><tr><td><strong>Age:</strong></td><td>${e.age} years</td></tr><tr><td><strong>Contact Info:</strong></td><td>${e.contact_info||"Not provided"}</td></tr><tr><td><strong>Emergency Contact:</strong></td><td>${t}</td></tr></tbody></table></div><div class="col-md-6"><h6 class="text-muted mb-3">Insurance Information</h6><table class="table table-borderless"><tbody><tr><td><strong>Provider:</strong></td><td>${o}</td></tr><tr><td><strong>Policy Number:</strong></td><td>${a}</td></tr></tbody></table><div class="mt-4 p-3 bg-light rounded"><h6 class="text-muted mb-2">Quick Actions</h6><button class="btn btn-outline-primary btn-sm me-2" onclick="loadPatientHistory(${e.patient_id})"><i class="bi bi-clock-history me-1"></i>View History</button></div></div></div>`,selectedPatientId=e.patient_id};const renderHistoryModal=(e,t)=>{if(!e||0===e.length)return void(historyModalBody.innerHTML=`
-            <div class="text-center p-5 text-muted">
-                No appointment history found with this doctor.
-            </div>`);document.getElementById("historyModalLabel").innerHTML=`<i class="bi bi-clock-history me-2"></i>Appointment History - ${t}`,historyModalBody.innerHTML=`<div class="timeline">${e.map(e=>`<div class="card mb-3"><div class="card-header d-flex justify-content-between align-items-center"><div><strong>${new Date(e.schedule_date).toLocaleDateString()}</strong><span class="text-muted ms-2">${new Date(e.schedule_date).toLocaleTimeString()}</span></div><div><span class="status-badge status-${e.status}">${e.status}</span>${e.is_emergency?'<span class="badge bg-danger ms-2">Emergency</span>':""}</div></div><div class="card-body">${e.treatments?`<div class="mb-3"><h6 class="text-muted">Treatments:</h6><p class="mb-1">${e.treatments}</p><small class="text-success"><strong>Total Cost: $${e.total_cost}</strong></small></div>`:'<p class="text-muted">No treatments recorded</p>'}</div></div>`).join("")}</div>`};
 
-    // --- PAGE LOADERS & LOGIC ---
-    const loadStatistics = async () => {
-        try {
-            const stats = await authorizedFetch('/api/doctor/stats');
-            if (stats) {
-                todayTotalEl.textContent = stats.today.total_appointments || 0;
-                todayCompletedEl.textContent = stats.today.completed || 0;
-                todayScheduledEl.textContent = stats.today.scheduled || 0;
-                upcomingWeekEl.textContent = stats.upcoming_week || 0;
-            }
-        } catch (error) {
-            console.error('Failed to load statistics:', error);
-        }
+    const renderHistoryModal = (history, patientName) => {
+        document.getElementById("historyModalLabel").innerHTML = `<i class="bi bi-clock-history me-2"></i>History for ${patientName}`;
+        if (!history || history.length === 0) { historyModalBody.innerHTML = `<div class="text-center p-5 text-muted">No appointment history found with this doctor.</div>`; return; }
+        historyModalBody.innerHTML = `<div class="list-group list-group-flush">${history.map(a => `
+            <div class="list-group-item"><div class="d-flex w-100 justify-content-between"><h6 class="mb-1">${new Date(a.schedule_date).toLocaleDateString()}</h6><span class="badge bg-${a.status === 'Completed' ? 'success' : 'danger'}">${a.status}</span></div>
+            <p class="mb-1"><strong>Treatments:</strong> ${a.treatments || 'Consultation only'}</p>
+            <small class="text-success"><strong>Total Cost: $${parseFloat(a.total_cost || 0).toFixed(2)}</strong></small></div>`).join('')}</div>`;
     };
 
-    const loadAppointments = async (type) => {
-        renderSpinner(appointmentListContainer);
-        renderInitialPatientView();
-        selectedAppointmentId = null;
-        currentView = type;
-        const endpoint = type === 'today' ? '/api/doctor/appointments/today' : '/api/doctor/appointments/upcoming';
-        try {
-            currentAppointments = await authorizedFetch(endpoint);
-            renderAppointments(currentAppointments);
-        } catch (error) {
-            appointmentListContainer.innerHTML = `<div class="alert alert-danger">${error.message}</div>`;
+    const renderAddedTreatments = () => {
+        const list = document.getElementById("added-treatments-list");
+        const msg = document.getElementById("no-treatments-msg");
+        if (prescribedTreatments.length === 0) { msg.style.display = 'block'; list.innerHTML = ''; }
+        else {
+            msg.style.display = 'none';
+            list.innerHTML = prescribedTreatments.map((t, i) => `<li class="list-group-item d-flex justify-content-between align-items-center"><div><strong>${t.name}</strong></div><div><span class="badge bg-primary me-2">$${parseFloat(t.actual_price).toFixed(2)}</span><button type="button" class="btn btn-sm btn-outline-danger" data-index="${i}"><i class="bi bi-trash"></i></button></div></li>`).join('');
         }
     };
 
-    const loadCurrentView = () => {
-        if (currentView === 'today') loadAppointments('today');
-        else if (currentView === 'upcoming') loadAppointments('upcoming');
-        else if (currentView === 'search') {
-            const query = searchInput.value;
-            const startDate = startDateInput.value;
-            const endDate = endDateInput.value;
-            searchAppointments(query, startDate, endDate);
-        }
+    // --- DATA LOADERS & LOGIC ---
+    const loadAppointments = async (filter) => {
+        renderSpinner(appointmentListContainer); renderInitialPatientView(); selectedAppointment = null;
+        const appointments = await authorizedFetch(`/api/doctor/appointments/${filter}`);
+        currentAppointments = appointments; renderAppointments(currentAppointments);
     };
 
-    const loadPatientDetails = async (patientId) => {
-        try {
-            renderSpinner(patientModalBody);
-            patientModal.show();
-            const patient = await authorizedFetch(`/api/doctor/patients/${patientId}`);
-            if (patient) renderPatientModal(patient);
-        } catch (error) {
-            patientModalBody.innerHTML = `<div class="alert alert-danger">${error.message}</div>`;
-        }
+    const searchAppointments = async (query, startDate, endDate) => {
+        renderSpinner(appointmentListContainer); renderInitialPatientView();
+        const params = new URLSearchParams({ query, startDate, endDate });
+        const appointments = await authorizedFetch(`/api/doctor/appointments/search?${params.toString()}`);
+        currentAppointments = appointments; renderAppointments(currentAppointments);
     };
 
-    const loadPatientHistory = async (patientId) => {
-        try {
-            renderSpinner(historyModalBody);
-            historyModal.show();
-            const history = await authorizedFetch(`/api/doctor/patients/${patientId}/history`);
-            const patient = currentAppointments.find(a => a.patient_id == patientId);
-            const patientName = patient ? patient.patient_name : 'Unknown Patient';
-            if (history) renderHistoryModal(history, patientName);
-        } catch (error) {
-            historyModalBody.innerHTML = `<div class="alert alert-danger">${error.message}</div>`;
+    const loadInitialData = async () => {
+        const [profile, stats, treatments] = await Promise.all([
+            authorizedFetch('/api/doctor/profile'),
+            authorizedFetch('/api/doctor/stats'),
+            authorizedFetch('/api/list/treatments')
+        ]);
+        if (profile) document.getElementById('doctor-name').textContent = profile.name;
+        if (stats) {
+            document.getElementById("today-total").textContent = stats.today.total_appointments || 0;
+            document.getElementById("today-completed").textContent = stats.today.completed || 0;
+            document.getElementById("today-scheduled").textContent = stats.today.scheduled || 0;
+            document.getElementById("upcoming-week").textContent = stats.upcoming_week || 0;
         }
-    };
-    const loadDoctorProfile = async () => {
-        try {
-            const profile = await authorizedFetch('/api/doctor/profile');
-            if (profile && profile.name) {
-                document.getElementById('doctor-name').textContent = profile.name;
-            }
-        } catch (error) {
-            console.error("Failed to load doctor profile:", error);
-            document.getElementById('doctor-name').textContent = "Doctor";
+        if (treatments) {
+            treatmentCatalogue = treatments;
+            document.getElementById("treatment-select").innerHTML = `<option value="">Select treatment...</option>` + treatments.map(t => `<option value="${t.service_code}" data-price="${t.price}">${t.name} ($${t.price})</option>`).join('');
         }
+        loadAppointments('today');
     };
-    
-    // --- NEW: Add event listener for the logout button ---
-    document.getElementById('logout-button').addEventListener('click', (e) => {
-        e.preventDefault();
-        localStorage.removeItem('clinicProToken');
-        window.location.href = 'login.html';
-    });
-    
+
     // --- EVENT LISTENERS ---
-    appointmentListContainer.addEventListener("click",e=>{const t=e.target.closest(".appointment-item");if(t){const o=parseInt(t.dataset.appointmentId,10),a=parseInt(t.dataset.patientId,10);if(e.target.closest(".view-patient-btn"))return e.stopPropagation(),void loadPatientDetails(a);if(e.target.closest(".complete-btn"))return e.stopPropagation(),void updateAppointmentStatus(o,"Completed");const n=currentAppointments.find(e=>e.appointment_id===o);n&&(document.querySelector(".appointment-item.bg-light")?.classList.remove("bg-light"),t.classList.add("bg-light"),selectedAppointmentId=o,renderPatientDetails(n))}});
-    todayBtn.addEventListener("change",()=>{todayBtn.checked&&(dateRangeContainer.style.display="none",loadAppointments("today"))});
-    upcomingBtn.addEventListener("change",()=>{upcomingBtn.checked&&(dateRangeContainer.style.display="none",loadAppointments("upcoming"))});
-    customBtn.addEventListener("change",()=>{if(customBtn.checked){dateRangeContainer.style.display="block";const e=(new Date).toISOString().split("T")[0],t=new Date(Date.now()+6048e5).toISOString().split("T")[0];startDateInput.value=e,endDateInput.value=t}});
-    applyDateRangeBtn.addEventListener("click",()=>{const e=startDateInput.value,t=endDateInput.value;return e&&t?new Date(e)>new Date(t)?void showToast("Start date must be before end date","danger"):void searchAppointments("",e,t):void showToast("Please select both start and end dates","danger")});
-    const performSearch=()=>{const e=searchInput.value.trim();e.length<2?showToast("Please enter at least 2 characters to search","danger"):searchAppointments(e,"","")};
-    searchBtn.addEventListener("click",performSearch);
-    searchInput.addEventListener("keypress",e=>{"Enter"===e.key&&performSearch()});
-    searchInput.addEventListener("input",e=>{""===e.target.value&&loadCurrentView()});
-    viewHistoryBtn.addEventListener("click",()=>{selectedPatientId&&(patientModal.hide(),loadPatientHistory(selectedPatientId))});
-    
-    // --- GLOBAL FUNCTIONS ---
-    window.updateAppointmentStatus=updateAppointmentStatus;
-    window.loadPatientHistory=loadPatientHistory;
+    document.querySelector('.btn-group').addEventListener('change', e => {
+        const container = document.getElementById('date-range-container');
+        if (e.target.id === 'btn-today') { container.style.display = "none"; loadAppointments("today"); }
+        if (e.target.id === 'btn-upcoming') { container.style.display = "none"; loadAppointments("upcoming"); }
+        if (e.target.id === 'btn-custom') { container.style.display = "block"; }
+    });
 
-    // --- INITIAL LOAD ---
-    loadAppointments('today');
-    loadStatistics();
-    loadDoctorProfile();
+    document.getElementById('apply-date-range').onclick = () => {
+        const start = document.getElementById('start-date').value;
+        const end = document.getElementById('end-date').value;
+        if (start && end) searchAppointments("", start, end); else showToast("Please select both dates", "danger");
+    };
+
+    const performSearch = () => searchAppointments(document.getElementById('search-input').value, "", "");
+    document.getElementById('search-btn').onclick = performSearch;
+    document.getElementById('search-input').onkeypress = e => { if (e.key === "Enter") performSearch(); };
+
+    appointmentListContainer.onclick = e => {
+        const item = e.target.closest(".appointment-item");
+        if (!item) return;
+        document.querySelector(".appointment-item.active")?.classList.remove("active");
+        item.classList.add("active");
+        selectedAppointment = currentAppointments.find(a => a.appointment_id == item.dataset.appointmentId);
+        if (selectedAppointment) renderPatientDetails(selectedAppointment);
+    };
+
+    patientInfoContainer.onclick = async e => {
+        const action = e.target.closest('button')?.dataset.action;
+        if (!action || !selectedAppointment) return;
+        if (action === 'complete') {
+            prescribedTreatments = [];
+            completionForm.reset();
+            renderAddedTreatments();
+            document.getElementById("completion-patient-info").innerHTML = `Completing appointment for <strong>${selectedAppointment.patient_name}</strong>.`;
+            completionModal.show();
+        }
+        if (action === 'view-history') {
+            renderSpinner(historyModalBody); historyModal.show();
+            const history = await authorizedFetch(`/api/doctor/patients/${selectedAppointment.patient_id}/history`);
+            renderHistoryModal(history, selectedAppointment.patient_name);
+        }
+    };
+
+    document.getElementById('add-treatment-btn').onclick = () => {
+        const select = document.getElementById("treatment-select");
+        const priceInput = document.getElementById("treatment-price");
+        if (!select.value) { showToast("Please select a treatment.", 'danger'); return; }
+        const option = select.options[select.selectedIndex];
+        prescribedTreatments.push({ service_code: select.value, name: option.text.split(' ($')[0], actual_price: parseFloat(priceInput.value || option.dataset.price) });
+        renderAddedTreatments();
+        select.value = ''; priceInput.value = '';
+    };
+
+    document.getElementById("treatment-select").onchange = e => {
+        const price = e.target.options[e.target.selectedIndex].dataset.price;
+        document.getElementById("treatment-price").value = price || '';
+    };
+
+    document.getElementById("added-treatments-list").onclick = e => {
+        const btn = e.target.closest('button[data-index]');
+        if (btn) { prescribedTreatments.splice(parseInt(btn.dataset.index, 10), 1); renderAddedTreatments(); }
+    };
+
+    completionForm.onsubmit = async e => {
+        e.preventDefault();
+        const data = { consultation_notes: document.getElementById("consultation_notes").value, treatments: prescribedTreatments };
+        if (!data.consultation_notes) { showToast("Consultation notes are required.", 'danger'); return; }
+
+        const result = await authorizedFetch(`/api/doctor/appointments/${selectedAppointment.appointment_id}/complete`, { method: 'POST', body: JSON.stringify(data) });
+        if (result !== null) {
+            completionModal.hide(); showToast("Appointment completed successfully.");
+            loadAppointments(document.getElementById('btn-today').checked ? 'today' : 'upcoming'); // Refresh current view
+        }
+    };
+
+    document.getElementById('logout-button').onclick = () => { localStorage.removeItem('clinicProToken'); window.location.href = 'login.html'; };
+
+    loadInitialData();
 });

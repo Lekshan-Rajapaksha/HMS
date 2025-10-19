@@ -1,82 +1,38 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Doctor Portal | ClinicPro</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet">
     <style>
-        /* Original Styles (kept for base structure) */
         :root {
             --primary-color: #6a5af9;
             --secondary-color: #eef2f9;
-            --text-color-dark: #2c3e50;
-            --text-color-muted: #8492a6;
+            --text-dark: #2c3e50;
+            --text-muted: #8492a6;
             --border-color: #dfe7ef;
+            --border-radius-lg: 1rem;
+            --card-shadow: 0 8px 30px rgba(0, 0, 0, 0.08);
         }
+
         body {
             font-family: 'Poppins', sans-serif;
-            background-color: var(--secondary-color);
-            color: var(--text-color-dark);
-        }
-        .card {
-            border: none;
-            border-radius: 0.75rem;
-            box-shadow: 0 4px 25px rgba(0, 0, 0, 0.05);
-            background-color: #ffffff;
-        }
-        .patient-info-card {
-            position: sticky;
-            top: 20px;
-        }
-        .status-badge {
-            font-size: 0.8em;
-            padding: 0.4em 0.8em;
-            border-radius: 20px;
-        }
-        .status-Scheduled { background-color: #cfe2ff; color: #0a58ca; }
-        .status-Completed { background-color: #d1e7dd; color: #0f5132; }
-        .status-Cancelled { background-color: #f8d7da; color: #842029; }
-        
-        /* --- NEW BEAUTIFUL THEME --- */
-
-        :root {
-            --primary-gradient: linear-gradient(135deg, #6a5af9, #8e82ff);
-            --success-color: #28a745;
-            --warning-color: #ffc107;
-            --info-color: #17a2b8;
-            --light-bg: #f8f9fa;
-            --card-shadow: 0 8px 30px rgba(0,0,0,0.08);
-            --border-radius-lg: 1rem;
-            --glass-bg: rgba(255, 255, 255, 0.2); /* Semi-transparent white */
-            --glass-border: rgba(255, 255, 255, 0.3); /* Lighter border */
-            --glass-shadow: rgba(0, 0, 0, 0.1); /* Soft shadow */
+            background: linear-gradient(135deg, #e0eafc, #cfdef3);
+            color: var(--text-dark);
         }
 
-        body {
-            background: linear-gradient(135deg, #e0eafc, #cfdef3); /* A subtle blue gradient background for body */
-            color: var(--text-color-dark);
-        }
-
-        /* Header */
         .header {
             background-color: #fff;
             padding: 1rem 2rem;
             border-bottom: 1px solid var(--border-color);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-        }
-        .header .logo {
-            font-weight: 700;
-            font-size: 1.5rem;
-            color: var(--primary-color);
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
         }
 
-        /* Floating Statistic Widgets */
         .stat-card {
             border-radius: var(--border-radius-lg);
             color: white;
@@ -85,15 +41,16 @@
             border: none;
             overflow: hidden;
             position: relative;
-            background: rgba(255, 255, 255, 0.15); /* Glass base for stats */
             backdrop-filter: blur(10px);
             border: 1px solid rgba(255, 255, 255, 0.3);
             box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
         }
+
         .stat-card:hover {
             transform: translateY(-5px);
-            box-shadow: 0 12px 35px rgba(0,0,0,0.12);
+            box-shadow: 0 12px 35px rgba(0, 0, 0, 0.12);
         }
+
         .stat-card .stat-icon {
             font-size: 3rem;
             opacity: 0.8;
@@ -102,135 +59,105 @@
             top: 50%;
             transform: translateY(-50%);
         }
+
         .stat-card h4 {
             font-size: 2.25rem;
             font-weight: 700;
         }
-        .stat-card p {
-             color: rgba(255, 255, 255, 0.9);
+
+        .stat-card.bg-primary-gradient {
+            background: linear-gradient(135deg, rgba(106, 90, 249, 0.8), rgba(142, 130, 255, 0.8));
         }
-        /* Specific gradients for stat cards to maintain branding within glass effect */
-        .stat-card.bg-primary-gradient { background: linear-gradient(135deg, rgba(106, 90, 249, 0.7), rgba(142, 130, 255, 0.7)); }
-        .stat-card.bg-success-gradient { background: linear-gradient(135deg, rgba(40, 167, 69, 0.7), rgba(81, 194, 109, 0.7)); }
-        .stat-card.bg-warning-gradient { background: linear-gradient(135deg, rgba(255, 193, 7, 0.7), rgba(255, 213, 90, 0.7)); }
-        .stat-card.bg-info-gradient { background: linear-gradient(135deg, rgba(23, 162, 184, 0.7), rgba(69, 205, 226, 0.7)); }
 
+        .stat-card.bg-success-gradient {
+            background: linear-gradient(135deg, rgba(40, 167, 69, 0.8), rgba(81, 194, 109, 0.8));
+        }
 
-        /* Main Appointments Card */
+        .stat-card.bg-warning-gradient {
+            background: linear-gradient(135deg, rgba(255, 193, 7, 0.8), rgba(255, 213, 90, 0.8));
+        }
+
+        .stat-card.bg-info-gradient {
+            background: linear-gradient(135deg, rgba(23, 162, 184, 0.8), rgba(69, 205, 226, 0.8));
+        }
+
         .appointments-main-card {
             border-radius: var(--border-radius-lg);
             box-shadow: var(--card-shadow);
-            background-color: #ffffff; /* Keep main card solid for contrast */
+            background-color: #ffffff;
         }
-        .appointments-main-card .card-header {
-            background-color: transparent;
-            font-weight: 600;
-            padding: 1.25rem;
-            border-bottom: 1px solid var(--border-color);
-        }
-        
-        /* Glassmorphic Appointment Item Design */
+
         .appointment-list {
-            max-height: 70vh; /* Make list scrollable if too long */
+            max-height: 70vh;
             overflow-y: auto;
-            padding: 1rem; /* Add padding around the list of cards */
+            padding: 1rem;
         }
+
         .appointment-item {
             display: flex;
             align-items: center;
-            padding: 0.8rem 1.2rem; /* Smaller padding */
-            margin-bottom: 0.75rem; /* Space between cards */
-            border-radius: 0.75rem; /* More rounded corners */
+            padding: 0.8rem 1.2rem;
+            margin-bottom: 0.75rem;
+            border-radius: 0.75rem;
             transition: all 0.3s ease-in-out;
             cursor: pointer;
+            background: rgba(255, 255, 255, 0.4);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
+            position: relative;
+        }
 
-            /* Glassmorphism styles */
-            background: rgba(255, 255, 255, 0.2); /* Semi-transparent background */
-            backdrop-filter: blur(8px); /* Blur effect */
-            border: 1px solid rgba(255, 255, 255, 0.4); /* Subtle white border */
-            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08); /* Soft shadow */
-        }
-        .appointment-item:last-child {
-            margin-bottom: 0;
-        }
-        .appointment-item .time-slot {
-            text-align: center;
-            margin-right: 1.2rem; /* Slightly smaller margin */
-            min-width: 70px; /* Adjust width */
-        }
-        .appointment-item .time-slot .time {
-            font-weight: 600;
-            font-size: 1rem; /* Smaller font size */
-            color: var(--text-color-dark); /* Darker text for readability on glass */
-        }
-        .appointment-item .time-slot .duration {
-            font-size: 0.75rem; /* Smaller font size */
-            color: var(--text-color-muted);
-        }
-        .appointment-item .patient-details {
-            flex-grow: 1;
-        }
-        .appointment-item .patient-details .patient-name {
-            font-weight: 600;
-            margin-bottom: 0.1rem;
-            font-size: 0.95rem; /* Slightly smaller */
-        }
-        .appointment-item .patient-details .appointment-reason {
-            font-size: 0.85rem; /* Slightly smaller */
-            color: var(--text-color-muted);
-        }
-        /* Status indicator becomes a colored left border inside the item */
         .appointment-item::before {
             content: '';
             position: absolute;
             left: 0;
             top: 0;
             bottom: 0;
-            width: 4px; /* Thinner indicator */
+            width: 4px;
             border-top-left-radius: 0.75rem;
             border-bottom-left-radius: 0.75rem;
         }
-        .appointment-item.status-scheduled::before { background-color: var(--primary-color); }
-        .appointment-item.status-completed::before { background-color: var(--success-color); }
-        .appointment-item.status-cancelled::before { background-color: #dc3545; }
-        
+
+        .appointment-item.status-scheduled::before,
+        .appointment-item.status-rescheduled::before {
+            background-color: var(--primary-color);
+        }
+
+        .appointment-item.status-completed::before {
+            background-color: #28a745;
+        }
+
         .appointment-item:hover {
-             background: rgba(255, 255, 255, 0.35); /* More transparent on hover */
-             border: 1px solid rgba(255, 255, 255, 0.5);
-             transform: translateY(-2px);
-             box-shadow: 0 6px 15px rgba(0, 0, 0, 0.12);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 15px rgba(0, 0, 0, 0.12);
         }
+
         .appointment-item.active {
-            background: rgba(255, 255, 255, 0.4);
-            border: 1px solid var(--primary-color); /* Primary border on active */
+            border-left: 4px solid var(--primary-color);
+            background: rgba(239, 238, 255, 0.9);
             box-shadow: 0 6px 20px rgba(106, 90, 249, 0.2);
-            position: relative; /* Ensure ::before is relative to this */
-        }
-        /* Hide the old status-indicator div */
-        .appointment-item .status-indicator {
-            display: none;
         }
 
+        .appointment-item .time-slot {
+            text-align: center;
+            margin-right: 1.2rem;
+            min-width: 70px;
+        }
 
-        /* New Patient Info Card Design */
+        .patient-info-widget {
+            position: sticky;
+            top: 20px;
+        }
+
         .patient-info-widget .card-body {
             padding: 1.5rem;
-            background: rgba(255, 255, 255, 0.5); /* Glass background */
+            background: rgba(255, 255, 255, 0.7);
             backdrop-filter: blur(10px);
             border: 1px solid rgba(255, 255, 255, 0.4);
             border-radius: var(--border-radius-lg);
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-        }
-        .patient-info-widget .card { /* Override the default .card background for this widget */
-            background: transparent;
         }
 
-        .patient-info-header {
-            text-align: center;
-            padding-bottom: 1.5rem;
-            margin-bottom: 1.5rem;
-            border-bottom: 1px solid var(--border-color);
-        }
         .patient-avatar {
             width: 90px;
             height: 90px;
@@ -243,24 +170,18 @@
             font-size: 2.5rem;
             margin-bottom: 1rem;
         }
-        .patient-info-header h5 {
-            font-weight: 600;
-            margin-bottom: 0.25rem;
-        }
-        .patient-info-header p {
-            color: var(--text-color-muted);
-            margin-bottom: 0;
-        }
+
         .patient-info-list {
             list-style: none;
             padding: 0;
         }
+
         .patient-info-list li {
             display: flex;
             align-items: center;
             margin-bottom: 1rem;
-            font-size: 0.9rem;
         }
+
         .patient-info-list li i {
             color: var(--primary-color);
             margin-right: 1rem;
@@ -268,117 +189,49 @@
             width: 20px;
             text-align: center;
         }
-
-        /* Modal styling */
-        .modal-content {
-            border-radius: var(--border-radius-lg);
-            border: none;
-        }
-        .modal-header {
-            background: var(--primary-gradient);
-            color: white;
-            border-bottom: none;
-        }
-        .modal-header .btn-close {
-            filter: invert(1) grayscale(100%) brightness(200%);
-        }
-        .modal-title {
-            font-weight: 600;
-        }
-
-        /* --- Mobile Responsiveness (adjustments to original) --- */
-        @media (max-width: 768px) {
-            .header {
-                flex-direction: column;
-                gap: 1rem;
-                text-align: center;
-            }
-            .patient-info-card {
-                position: static;
-                margin-top: 2rem;
-            }
-            .card-header .d-flex {
-                flex-direction: column;
-                gap: 1rem;
-                align-items: stretch !important;
-            }
-            .btn-group, .input-group {
-                width: 100%;
-            }
-        }
-
-        @media (max-width: 576px) {
-             .stat-card {
-                margin-bottom: 1rem;
-            }
-            .appointment-item {
-                flex-direction: column;
-                align-items: flex-start;
-                padding-left: 1.2rem; /* Re-adjust padding for the ::before pseudo-element */
-            }
-            .appointment-item .time-slot {
-                margin-bottom: 0.5rem;
-                margin-right: 0;
-                text-align: left;
-            }
-            /* Adjust ::before for mobile to be a top border */
-            .appointment-item::before {
-                width: 100%;
-                height: 4px;
-                top: 0;
-                left: 0;
-                border-top-left-radius: 0.75rem;
-                border-top-right-radius: 0.75rem;
-                border-bottom-left-radius: 0;
-            }
-            .appointment-item.active {
-                border: 1px solid var(--primary-color); /* Full border on active */
-                padding-left: 1.2rem;
-                border-top: 4px solid var(--primary-color); /* Reinforce active state with top border */
-            }
-        }
     </style>
 </head>
+
 <body>
     <div class="toast-container position-fixed top-0 end-0 p-3"></div>
 
-    <header class="header">
-        <div class="logo"><i class="bi bi-activity me-2"></i>ClinicPro</div>
+    <header class="header d-flex justify-content-between align-items-center">
+        <div class="logo fw-bold fs-4" style="color: var(--primary-color);"><i class="bi bi-activity me-2"></i>ClinicPro
+        </div>
         <div class="user-info d-flex align-items-center">
-            <span>Welcome, <strong><span id="doctor-name">Dr. Evelyn Reed</span></strong></span>
-            <a href="login.html" id="logout-button" class="btn btn-outline-danger btn-sm ms-3">
-                <i class="bi bi-box-arrow-right me-1"></i>Logout
-            </a>
+            <span>Welcome, <strong><span id="doctor-name">Doctor</span></strong></span>
+            <button id="logout-button" class="btn btn-outline-danger btn-sm ms-3"><i
+                    class="bi bi-box-arrow-right me-1"></i>Logout</button>
         </div>
     </header>
 
     <main class="container-fluid mt-4 p-lg-4">
-        <div class="row mb-4">
+        <div class="row mb-4 g-3">
             <div class="col-md-3">
                 <div class="stat-card bg-primary-gradient">
                     <div class="stat-icon"><i class="bi bi-calendar-check"></i></div>
-                    <h4 id="today-total">12</h4>
-                    <p class="mb-0">Today's Appointments</p>
+                    <h4 id="today-total">0</h4>
+                    <p class="mb-0">Today's Total</p>
                 </div>
             </div>
             <div class="col-md-3">
                 <div class="stat-card bg-success-gradient">
                     <div class="stat-icon"><i class="bi bi-check-circle"></i></div>
-                    <h4 id="today-completed">4</h4>
+                    <h4 id="today-completed">0</h4>
                     <p class="mb-0">Completed Today</p>
                 </div>
             </div>
             <div class="col-md-3">
                 <div class="stat-card bg-warning-gradient">
                     <div class="stat-icon"><i class="bi bi-clock"></i></div>
-                    <h4 id="today-scheduled">8</h4>
+                    <h4 id="today-scheduled">0</h4>
                     <p class="mb-0">Pending Today</p>
                 </div>
             </div>
             <div class="col-md-3">
                 <div class="stat-card bg-info-gradient">
                     <div class="stat-icon"><i class="bi bi-calendar-plus"></i></div>
-                    <h4 id="upcoming-week">34</h4>
+                    <h4 id="upcoming-week">0</h4>
                     <p class="mb-0">Upcoming Week</p>
                 </div>
             </div>
@@ -387,135 +240,93 @@
         <div class="row">
             <div class="col-lg-7">
                 <div class="card appointments-main-card">
-                    <div class="card-header d-flex justify-content-between align-items-center flex-wrap">
+                    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
                         <div><i class="bi bi-calendar-week me-2"></i>Appointments</div>
-                        <div class="d-flex gap-2 flex-wrap mt-2 mt-md-0">
-                             <div class="input-group" style="max-width: 250px;">
-                                <input type="text" id="search-input" class="form-control form-control-sm" placeholder="Search patients...">
-                                <button class="btn btn-outline-secondary btn-sm" type="button" id="search-btn"><i class="bi bi-search"></i></button>
-                            </div>
+                        <div class="d-flex gap-2 flex-wrap">
+                            <div class="input-group" style="max-width: 250px;"><input type="text" id="search-input"
+                                    class="form-control form-control-sm" placeholder="Search patients..."><button
+                                    class="btn btn-outline-secondary btn-sm" type="button" id="search-btn"><i
+                                        class="bi bi-search"></i></button></div>
                             <div class="btn-group" role="group">
-                                <input type="radio" class="btn-check" name="btnradio" id="btn-today" autocomplete="off" checked>
-                                <label class="btn btn-outline-primary btn-sm" for="btn-today">Today</label>
-                                <input type="radio" class="btn-check" name="btnradio" id="btn-upcoming" autocomplete="off">
-                                <label class="btn btn-outline-primary btn-sm" for="btn-upcoming">Upcoming</label>
-                                <input type="radio" class="btn-check" name="btnradio" id="btn-custom" autocomplete="off">
-                                <label class="btn btn-outline-primary btn-sm" for="btn-custom">Custom</label>
+                                <input type="radio" class="btn-check" name="btnradio" id="btn-today" autocomplete="off"
+                                    checked><label class="btn btn-outline-primary btn-sm" for="btn-today">Today</label>
+                                <input type="radio" class="btn-check" name="btnradio" id="btn-upcoming"
+                                    autocomplete="off"><label class="btn btn-outline-primary btn-sm"
+                                    for="btn-upcoming">Upcoming</label>
+                                <input type="radio" class="btn-check" name="btnradio" id="btn-custom"
+                                    autocomplete="off"><label class="btn btn-outline-primary btn-sm"
+                                    for="btn-custom">Custom</label>
                             </div>
                         </div>
                     </div>
-                     <div id="date-range-container" class="card-body border-bottom" style="display: none;">
+                    <div id="date-range-container" class="card-body border-bottom" style="display: none;">
                         <div class="row g-2 align-items-center">
-                            <div class="col-md-5"><input type="date" id="start-date" class="form-control form-control-sm"></div>
-                            <div class="col-md-5"><input type="date" id="end-date" class="form-control form-control-sm"></div>
-                            <div class="col-md-2"><button id="apply-date-range" class="btn btn-primary btn-sm w-100">Apply</button></div>
+                            <div class="col-md-5"><input type="date" id="start-date"
+                                    class="form-control form-control-sm"></div>
+                            <div class="col-md-5"><input type="date" id="end-date" class="form-control form-control-sm">
+                            </div>
+                            <div class="col-md-2"><button id="apply-date-range"
+                                    class="btn btn-primary btn-sm w-100">Apply</button></div>
                         </div>
                     </div>
                     <div class="card-body p-0">
-                        <div id="appointment-list-container" class="appointment-list">
-                            <div class="appointment-item status-scheduled active">
-                                <div class="time-slot">
-                                    <div class="time">02:00 PM</div>
-                                    <div class="duration">30 min</div>
-                                </div>
-                                <div class="patient-details">
-                                    <div class="patient-name">Liam Johnson</div>
-                                    <div class="appointment-reason">Follow-up Consultation</div>
-                                </div>
-                                <i class="bi bi-chevron-right text-muted ms-auto"></i>
-                            </div>
-                             <div class="appointment-item status-scheduled">
-                                <div class="time-slot">
-                                    <div class="time">02:30 PM</div>
-                                    <div class="duration">30 min</div>
-                                </div>
-                                <div class="patient-details">
-                                    <div class="patient-name">Olivia Williams</div>
-                                    <div class="appointment-reason">Annual Check-up</div>
-                                </div>
-                                <i class="bi bi-chevron-right text-muted ms-auto"></i>
-                            </div>
-                            <div class="appointment-item status-completed">
-                                <div class="time-slot">
-                                    <div class="time text-success">11:00 AM</div>
-                                    <div class="duration">30 min</div>
-                                </div>
-                                <div class="patient-details">
-                                    <div class="patient-name">Noah Brown</div>
-                                    <div class="appointment-reason">Prescription Refill</div>
-                                </div>
-                                <i class="bi bi-chevron-right text-muted ms-auto"></i>
-                            </div>
-                            <div class="appointment-item status-cancelled">
-                                <div class="time-slot">
-                                    <div class="time text-danger">10:30 AM</div>
-                                    <div class="duration">30 min</div>
-                                </div>
-                                <div class="patient-details">
-                                    <div class="patient-name">Emma Jones</div>
-                                    <div class="appointment-reason">Cancelled by patient</div>
-                                </div>
-                                <i class="bi bi-chevron-right text-muted ms-auto"></i>
-                            </div>
-                        </div>
+                        <div id="appointment-list-container" class="appointment-list"></div>
                     </div>
                 </div>
             </div>
-
             <div class="col-lg-5">
-                <div id="patient-info-container" class="patient-info-card">
-                     <div class="card patient-info-widget">
-                        <div class="card-body">
-                            <div class="patient-info-header">
-                                <div class="patient-avatar">LJ</div>
-                                <h5>Liam Johnson</h5>
-                                <p>Appointment ID: #AP-2025-4521</p>
-                            </div>
-                            <ul class="patient-info-list">
-                                <li><i class="bi bi-person"></i> <div><strong>Gender:</strong> Male</div></li>
-                                <li><i class="bi bi-cake2"></i> <div><strong>Date of Birth:</strong> May 14, 1988 (37 years)</div></li>
-                                <li><i class="bi bi-telephone"></i> <div><strong>Contact:</strong> +1 (555) 123-4567</div></li>
-                                <li><i class="bi bi-envelope"></i> <div><strong>Email:</strong> liam.j@example.com</div></li>
-                                <li><i class="bi bi-file-earmark-text"></i> <div><strong>Reason for visit:</strong> Follow-up Consultation</div></li>
-                            </ul>
-                            <div class="d-grid gap-2 mt-4">
-                                <button class="btn btn-primary"><i class="bi bi-camera-video me-2"></i>Start Teleconsultation</button>
-                                <button class="btn btn-outline-secondary" id="view-history-btn-widget"><i class="bi bi-clock-history me-2"></i>View Patient History</button>
-                            </div>
-                        </div>
-                    </div>
-
-                    </div>
+                <div id="patient-info-container" class="patient-info-widget"></div>
             </div>
         </div>
     </main>
 
-    <div class="modal fade" id="patientModal" tabindex="-1" aria-labelledby="patientModalLabel" aria-hidden="true">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="patientModalLabel"><i class="bi bi-person-fill me-2"></i>Patient Details</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-                </div>
-                <div class="modal-body" id="patientModalBody">
-                    </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                    <button type="button" class="btn btn-primary" id="view-history-btn"><i class="bi bi-clock-history me-2"></i>View History</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div class="modal fade" id="historyModal" tabindex="-1" aria-labelledby="historyModalLabel" aria-hidden="true">
+    <!-- Modals -->
+    <div class="modal fade" id="historyModal" tabindex="-1">
         <div class="modal-dialog modal-xl">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title" id="historyModalLabel"><i class="bi bi-clock-history me-2"></i>Appointment History</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    <h5 class="modal-title" id="historyModalLabel"></h5><button type="button" class="btn-close"
+                        data-bs-dismiss="modal"></button>
                 </div>
-                <div class="modal-body" id="historyModalBody">
+                <div class="modal-body" id="historyModalBody"></div>
+            </div>
+        </div>
+    </div>
+    <div class="modal fade" id="completionModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="completionModalLabel"><i
+                            class="bi bi-check-circle-fill me-2"></i>Complete Appointment</h5><button type="button"
+                        class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <form id="completion-form">
+                    <div class="modal-body">
+                        <div class="alert alert-info" id="completion-patient-info"></div>
+                        <div class="mb-3"><label for="consultation_notes" class="form-label fw-bold">Consultation
+                                Notes</label><textarea class="form-control" id="consultation_notes" rows="4"
+                                placeholder="Enter assessment, diagnosis, plan..."></textarea></div>
+                        <hr>
+                        <h5 class="mb-3">Prescribe Treatments</h5>
+                        <div class="row g-2 mb-3">
+                            <div class="col-md-6"><label for="treatment-select" class="form-label">Select
+                                    Treatment</label><select class="form-select" id="treatment-select"></select></div>
+                            <div class="col-md-4"><label for="treatment-price" class="form-label">Price
+                                    ($)</label><input type="number" step="0.01" class="form-control"
+                                    id="treatment-price" placeholder="Default price"></div>
+                            <div class="col-md-2 d-flex align-items-end"><button type="button"
+                                    class="btn btn-primary w-100" id="add-treatment-btn">Add</button></div>
+                        </div>
+                        <h6 class="text-muted">Added Treatments:</h6>
+                        <ul class="list-group" id="added-treatments-list">
+                            <li class="list-group-item text-center text-muted" id="no-treatments-msg">No treatments
+                                added.</li>
+                        </ul>
                     </div>
+                    <div class="modal-footer"><button type="button" class="btn btn-secondary"
+                            data-bs-dismiss="modal">Cancel</button><button type="submit" class="btn btn-success">Mark as
+                            Completed</button></div>
+                </form>
             </div>
         </div>
     </div>
@@ -523,4 +334,5 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="doctor-appointments.js"></script>
 </body>
+
 </html>
