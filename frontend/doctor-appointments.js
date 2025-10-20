@@ -14,111 +14,345 @@ document.addEventListener("DOMContentLoaded", () => {
     const completionForm = document.getElementById("completion-form");
 
     // State
-    let currentAppointments = [], treatmentCatalogue = [], prescribedTreatments = [], selectedAppointment = null;
+    let currentAppointments = [];
+    let treatmentCatalogue = [];
+    let prescribedTreatments = [];
+    let selectedAppointment = null;
 
     // --- HELPER FUNCTIONS ---
     const showToast = (message, type = 'success') => {
         const toastId = `toast-${Date.now()}`;
         const icon = type === 'success' ? 'check-circle-fill' : 'exclamation-triangle-fill';
-        toastContainer.insertAdjacentHTML('beforeend', `<div id="${toastId}" class="toast align-items-center text-bg-${type} border-0" role="alert"><div class="d-flex"><div class="toast-body"><i class="bi bi-${icon} me-2"></i>${message}</div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button></div></div>`);
+        toastContainer.insertAdjacentHTML('beforeend', `
+            <div id="${toastId}" class="toast align-items-center text-bg-${type} border-0" role="alert">
+                <div class="d-flex">
+                    <div class="toast-body">
+                        <i class="bi bi-${icon} me-2"></i>${message}
+                    </div>
+                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+                </div>
+            </div>
+        `);
         const toastEl = document.getElementById(toastId);
-        const toast = new bootstrap.Toast(document.getElementById(toastId), { delay: 4000 });
+        const toast = new bootstrap.Toast(toastEl, { delay: 4000 });
         toast.show();
-        document.getElementById(toastId).addEventListener('hidden.bs.toast', e => e.target.remove());
+        toastEl.addEventListener('hidden.bs.toast', () => toastEl.remove());
     };
 
     const authorizedFetch = async (endpoint, options = {}) => {
-        const defaultOptions = { headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${authToken}` } };
-        const mergedOptions = { ...defaultOptions, ...options, headers: { ...defaultOptions.headers, ...options.headers } };
+        const defaultOptions = {
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
+            }
+        };
+        const mergedOptions = {
+            ...defaultOptions,
+            ...options,
+            headers: { ...defaultOptions.headers, ...options.headers }
+        };
+
         try {
             const response = await fetch(`${API_BASE_URL}${endpoint}`, mergedOptions);
-            if ([401, 403].includes(response.status)) { localStorage.removeItem('clinicProToken'); window.location.href = '/login.html'; return null; }
-            if (!response.ok) { const err = await response.json(); throw new Error(err.message || `HTTP error! status: ${response.status}`); }
+
+            if ([401, 403].includes(response.status)) {
+                localStorage.removeItem('clinicProToken');
+                window.location.href = '/login.html';
+                return null;
+            }
+
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error(err.message || `HTTP error! status: ${response.status}`);
+            }
+
             return response.status === 204 ? null : response.json();
-        } catch (error) { showToast(error.message, 'danger'); return null; }
+        } catch (error) {
+            console.error("Fetch error:", error);
+            showToast(error.message, 'danger');
+            return null;
+        }
     };
 
     // --- RENDER FUNCTIONS ---
-    const renderSpinner = container => container.innerHTML = `<div class="d-flex justify-content-center p-5"><div class="spinner-border text-primary"></div></div>`;
-    const renderInitialPatientView = () => patientInfoContainer.innerHTML = `<div class="card patient-info-widget"><div class="card-body text-center p-5"><i class="bi bi-person-circle fs-1 text-muted"></i><p class="mt-3 text-muted">Select an appointment to view patient details.</p></div></div>`;
+    const renderSpinner = container => {
+        if (container) {
+            container.innerHTML = `
+                <div class="d-flex justify-content-center p-5">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                </div>
+            `;
+        }
+    };
+
+    const renderInitialPatientView = () => {
+        patientInfoContainer.innerHTML = `
+            <div class="card patient-info-widget">
+                <div class="card-body text-center p-5">
+                    <i class="bi bi-person-circle fs-1 text-muted"></i>
+                    <p class="mt-3 text-muted">Select an appointment to view patient details.</p>
+                </div>
+            </div>
+        `;
+    };
 
     const renderAppointments = (appointments) => {
         if (!appointments || appointments.length === 0) {
-            appointmentListContainer.innerHTML = `<div class="text-center p-5 text-muted">No appointments found.</div>`;
-            renderInitialPatientView(); return;
+            appointmentListContainer.innerHTML = `
+                <div class="text-center p-5 text-muted">
+                    <i class="bi bi-calendar-x fs-1 d-block mb-3"></i>
+                    No appointments found.
+                </div>
+            `;
+            renderInitialPatientView();
+            return;
         }
+
         appointmentListContainer.innerHTML = appointments.map(appt => {
             const time = new Date(appt.schedule_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            return `<div class="appointment-item status-${(appt.status || 'scheduled').toLowerCase()}" data-appointment-id="${appt.appointment_id}">
-                <div class="time-slot"><div class="time">${time}</div><div class="duration">30 min</div></div>
-                <div class="patient-details"><div class="fw-bold">${appt.patient_name}</div><div class="small text-muted">Age: ${appt.patient_age} | ${appt.insurance_provider || 'No Insurance'}</div></div>
-                <i class="bi bi-chevron-right text-muted ms-auto"></i>
-            </div>`;
+            const statusClass = (appt.status || 'scheduled').toLowerCase();
+
+            return `
+                <div class="appointment-item status-${statusClass}" data-appointment-id="${appt.appointment_id}">
+                    <div class="time-slot">
+                        <div class="time">${time}</div>
+                        <div class="duration">30 min</div>
+                    </div>
+                    <div class="patient-details">
+                        <div class="fw-bold">${appt.patient_name}</div>
+                        <div class="small text-muted">
+                            Age: ${appt.patient_age} | ${appt.insurance_provider || 'No Insurance'}
+                        </div>
+                    </div>
+                    <i class="bi bi-chevron-right text-muted ms-auto"></i>
+                </div>
+            `;
         }).join('');
 
+        // Auto-select first appointment
         const firstApptId = appointments[0].appointment_id;
-        document.querySelector(`.appointment-item[data-appointment-id="${firstApptId}"]`).classList.add('active');
-        selectedAppointment = appointments.find(a => a.appointment_id == firstApptId);
+        const firstApptElement = document.querySelector(`.appointment-item[data-appointment-id="${firstApptId}"]`);
+        if (firstApptElement) {
+            firstApptElement.classList.add('active');
+        }
+        selectedAppointment = appointments[0];
         renderPatientDetails(selectedAppointment);
     };
 
     const renderPatientDetails = (appt) => {
-        if (!appt) { renderInitialPatientView(); return; }
+        if (!appt) {
+            renderInitialPatientView();
+            return;
+        }
+
         const apptDate = new Date(appt.schedule_date);
+        const today = new Date();
+
+        // Check if appointment is today and in a completable status
+        const isToday = apptDate.toDateString() === today.toDateString();
+        const canComplete = isToday && ['Scheduled', 'Rescheduled'].includes(appt.status);
+
         patientInfoContainer.innerHTML = `
-            <div class="card patient-info-widget">
-                <div class="card-body">
-                    <div class="text-center pb-4 mb-4 border-bottom">
-                        <div class="patient-avatar">${appt.patient_name.match(/\b(\w)/g).join('').substring(0, 2)}</div>
-                        <h5 class="mt-3">${appt.patient_name}</h5>
-                        <p class="text-muted mb-0">Apt ID: #${appt.appointment_id}</p>
+        <div class="card patient-info-widget">
+            <div class="card-body">
+                <div class="text-center pb-4 mb-4 border-bottom">
+                    <div class="patient-avatar">
+                        ${appt.patient_name.match(/\b(\w)/g).join('').substring(0, 2).toUpperCase()}
                     </div>
-                    <ul class="patient-info-list">
-                        <li><i class="bi bi-person"></i> <div><strong>Gender:</strong> ${appt.patient_gender || 'N/A'}</div></li>
-                        <li><i class="bi bi-cake2"></i> <div><strong>Age:</strong> ${appt.patient_age} years</div></li>
-                        <li><i class="bi bi-telephone"></i> <div><strong>Contact:</strong> ${appt.patient_contact || 'N/A'}</div></li>
-                        <li><i class="bi bi-shield-check"></i> <div><strong>Insurance:</strong> ${appt.insurance_provider || 'No Insurance'}</div></li>
-                        <li><i class="bi bi-calendar-event"></i> <div><strong>Appointment:</strong> ${apptDate.toLocaleString()}</div></li>
-                    </ul>
-                    <div class="d-grid gap-2 mt-4">
-                        ${['Scheduled', 'Rescheduled'].includes(appt.status) ? `<button class="btn btn-success" data-action="complete"><i class="bi bi-check-circle me-2"></i>Complete Appointment</button>` : `<div class="alert alert-success text-center">Appointment Completed</div>`}
-                        <button class="btn btn-outline-secondary" data-action="view-history"><i class="bi bi-clock-history me-2"></i>View Patient History</button>
-                    </div>
+                    <h5 class="mt-3 mb-1">${appt.patient_name}</h5>
+                    <p class="text-muted mb-0">Appointment ID: #${appt.appointment_id}</p>
+                    <span class="badge bg-${appt.status === 'Completed' ? 'success' : 'primary'} mt-2">
+                        ${appt.status}
+                    </span>
+                    ${!isToday && ['Scheduled', 'Rescheduled'].includes(appt.status) ? `
+                        <div class="alert alert-warning mt-2 small p-2">
+                            <i class="bi bi-info-circle me-1"></i>Can only complete today's appointments
+                        </div>
+                    ` : ''}
                 </div>
-            </div>`;
+                
+                <ul class="patient-info-list">
+                    <li>
+                        <i class="bi bi-person"></i>
+                        <div>
+                            <strong>Gender:</strong> ${appt.patient_gender || 'N/A'}
+                        </div>
+                    </li>
+                    <li>
+                        <i class="bi bi-cake2"></i>
+                        <div>
+                            <strong>Age:</strong> ${appt.patient_age} years
+                        </div>
+                    </li>
+                    <li>
+                        <i class="bi bi-telephone"></i>
+                        <div>
+                            <strong>Contact:</strong> ${appt.patient_contact || 'N/A'}
+                        </div>
+                    </li>
+                    <li>
+                        <i class="bi bi-shield-check"></i>
+                        <div>
+                            <strong>Insurance:</strong> ${appt.insurance_provider || 'No Insurance'}
+                        </div>
+                    </li>
+                    <li>
+                        <i class="bi bi-calendar-event"></i>
+                        <div>
+                            <strong>Appointment:</strong> ${apptDate.toLocaleString()}
+                        </div>
+                    </li>
+                </ul>
+                
+                <div class="d-grid gap-2 mt-4">
+                    ${canComplete ? `
+                        <button class="btn btn-success" data-action="complete">
+                            <i class="bi bi-check-circle me-2"></i>Complete Appointment
+                        </button>
+                    ` : appt.status === 'Completed' ? `
+                        <div class="alert alert-success text-center mb-0">
+                            <i class="bi bi-check-circle-fill me-2"></i>Appointment Completed
+                        </div>
+                    ` : `
+                        <button class="btn btn-secondary" disabled>
+                            <i class="bi bi-clock me-2"></i>Complete (Available on Appointment Day)
+                        </button>
+                    `}
+                    <button class="btn btn-outline-secondary" data-action="view-history">
+                        <i class="bi bi-clock-history me-2"></i>View Patient History
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
     };
 
     const renderHistoryModal = (history, patientName) => {
-        document.getElementById("historyModalLabel").innerHTML = `<i class="bi bi-clock-history me-2"></i>History for ${patientName}`;
-        if (!history || history.length === 0) { historyModalBody.innerHTML = `<div class="text-center p-5 text-muted">No appointment history found with this doctor.</div>`; return; }
-        historyModalBody.innerHTML = `<div class="list-group list-group-flush">${history.map(a => `
-            <div class="list-group-item"><div class="d-flex w-100 justify-content-between"><h6 class="mb-1">${new Date(a.schedule_date).toLocaleDateString()}</h6><span class="badge bg-${a.status === 'Completed' ? 'success' : 'danger'}">${a.status}</span></div>
-            <p class="mb-1"><strong>Treatments:</strong> ${a.treatments || 'Consultation only'}</p>
-            <small class="text-success"><strong>Total Cost: $${parseFloat(a.total_cost || 0).toFixed(2)}</strong></small></div>`).join('')}</div>`;
+        document.getElementById("historyModalLabel").innerHTML = `
+            <i class="bi bi-clock-history me-2"></i>History for ${patientName}
+        `;
+
+        if (!history || history.length === 0) {
+            historyModalBody.innerHTML = `
+                <div class="text-center p-5 text-muted">
+                    <i class="bi bi-inbox fs-1 d-block mb-3"></i>
+                    No appointment history found with this doctor.
+                </div>
+            `;
+            return;
+        }
+
+        historyModalBody.innerHTML = `
+            <div class="list-group list-group-flush">
+                ${history.map(a => `
+                    <div class="list-group-item">
+                        <div class="d-flex w-100 justify-content-between align-items-start mb-2">
+                            <h6 class="mb-1">
+                                <i class="bi bi-calendar-event me-2"></i>
+                                ${new Date(a.schedule_date).toLocaleDateString()}
+                            </h6>
+                            <span class="badge bg-${a.status === 'Completed' ? 'success' : 'danger'}">
+                                ${a.status}
+                            </span>
+                        </div>
+                        <p class="mb-2">
+                            <strong>Treatments:</strong> ${a.treatments || 'Consultation only'}
+                        </p>
+                        ${a.total_cost ? `
+                            <small class="text-success">
+                                <i class="bi bi-currency-dollar me-1"></i>
+                                <strong>Total Cost: Rs.${parseFloat(a.total_cost).toFixed(2)}</strong>
+                            </small>
+                        ` : ''}
+                    </div>
+                `).join('')}
+            </div>
+        `;
     };
 
     const renderAddedTreatments = () => {
         const list = document.getElementById("added-treatments-list");
         const msg = document.getElementById("no-treatments-msg");
-        if (prescribedTreatments.length === 0) { msg.style.display = 'block'; list.innerHTML = ''; }
-        else {
-            msg.style.display = 'none';
-            list.innerHTML = prescribedTreatments.map((t, i) => `<li class="list-group-item d-flex justify-content-between align-items-center"><div><strong>${t.name}</strong></div><div><span class="badge bg-primary me-2">$${parseFloat(t.actual_price).toFixed(2)}</span><button type="button" class="btn btn-sm btn-outline-danger" data-index="${i}"><i class="bi bi-trash"></i></button></div></li>`).join('');
+        const countBadge = document.getElementById("treatment-count");
+        const totalSection = document.getElementById("treatments-total-section");
+        const totalElement = document.getElementById("treatments-total");
+
+        if (!list) return;
+
+        if (prescribedTreatments.length === 0) {
+            if (msg) msg.style.display = 'block';
+            list.innerHTML = `
+                <li class="list-group-item text-center text-muted py-4" id="no-treatments-msg">
+                    <i class="bi bi-inbox fs-4 d-block mb-2"></i>
+                    No treatments added yet
+                </li>
+            `;
+            if (countBadge) countBadge.textContent = '0';
+            if (totalSection) totalSection.style.display = 'none';
+        } else {
+            if (msg) msg.style.display = 'none';
+
+            // Calculate total
+            const total = prescribedTreatments.reduce((sum, t) => sum + parseFloat(t.actual_price), 0);
+
+            list.innerHTML = prescribedTreatments.map((t, i) => `
+                <li class="list-group-item">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div class="flex-grow-1">
+                            <div class="fw-bold">${t.name}</div>
+                            <small class="text-muted">Code: ${t.service_code}</small>
+                            ${t.notes ? `<div class="small text-muted mt-1">
+                                <i class="bi bi-chat-left-text"></i> ${t.notes}
+                            </div>` : ''}
+                        </div>
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="badge bg-success fs-6">
+                                Rs.${parseFloat(t.actual_price).toFixed(2)}
+                            </span>
+                            <button type="button" 
+                                    class="btn btn-sm btn-outline-danger" 
+                                    data-index="${i}"
+                                    title="Remove treatment">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                </li>
+            `).join('');
+
+            if (countBadge) countBadge.textContent = prescribedTreatments.length;
+            if (totalSection) {
+                totalSection.style.display = 'block';
+                if (totalElement) totalElement.textContent = `Rs.${total.toFixed(2)}`;
+            }
         }
     };
 
     // --- DATA LOADERS & LOGIC ---
     const loadAppointments = async (filter) => {
-        renderSpinner(appointmentListContainer); renderInitialPatientView(); selectedAppointment = null;
+        renderSpinner(appointmentListContainer);
+        renderInitialPatientView();
+        selectedAppointment = null;
+
         const appointments = await authorizedFetch(`/api/doctor/appointments/${filter}`);
-        currentAppointments = appointments; renderAppointments(currentAppointments);
+        currentAppointments = appointments || [];
+        renderAppointments(currentAppointments);
     };
 
     const searchAppointments = async (query, startDate, endDate) => {
-        renderSpinner(appointmentListContainer); renderInitialPatientView();
-        const params = new URLSearchParams({ query, startDate, endDate });
+        renderSpinner(appointmentListContainer);
+        renderInitialPatientView();
+
+        const params = new URLSearchParams();
+        if (query) params.append('query', query);
+        if (startDate) params.append('startDate', startDate);
+        if (endDate) params.append('endDate', endDate);
+
         const appointments = await authorizedFetch(`/api/doctor/appointments/search?${params.toString()}`);
-        currentAppointments = appointments; renderAppointments(currentAppointments);
+        currentAppointments = appointments || [];
+        renderAppointments(currentAppointments);
     };
 
     const loadInitialData = async () => {
@@ -127,97 +361,268 @@ document.addEventListener("DOMContentLoaded", () => {
             authorizedFetch('/api/doctor/stats'),
             authorizedFetch('/api/list/treatments')
         ]);
-        if (profile) document.getElementById('doctor-name').textContent = profile.name;
+
+        if (profile) {
+            document.getElementById('doctor-name').textContent = profile.name;
+        }
+
         if (stats) {
             document.getElementById("today-total").textContent = stats.today.total_appointments || 0;
             document.getElementById("today-completed").textContent = stats.today.completed || 0;
             document.getElementById("today-scheduled").textContent = stats.today.scheduled || 0;
             document.getElementById("upcoming-week").textContent = stats.upcoming_week || 0;
         }
+
         if (treatments) {
             treatmentCatalogue = treatments;
-            document.getElementById("treatment-select").innerHTML = `<option value="">Select treatment...</option>` + treatments.map(t => `<option value="${t.service_code}" data-price="${t.price}">${t.name} ($${t.price})</option>`).join('');
+            const treatmentSelect = document.getElementById("treatment-select");
+            if (treatmentSelect) {
+                treatmentSelect.innerHTML = `<option value="">Choose a treatment...</option>` +
+                    treatments.map(t => `
+                        <option value="${t.service_code}" data-price="${t.price}">
+                            ${t.name} (Rs.${parseFloat(t.price).toFixed(2)})
+                        </option>
+                    `).join('');
+            }
         }
+
         loadAppointments('today');
     };
 
     // --- EVENT LISTENERS ---
+
+    // Filter buttons
     document.querySelector('.btn-group').addEventListener('change', e => {
         const container = document.getElementById('date-range-container');
-        if (e.target.id === 'btn-today') { container.style.display = "none"; loadAppointments("today"); }
-        if (e.target.id === 'btn-upcoming') { container.style.display = "none"; loadAppointments("upcoming"); }
-        if (e.target.id === 'btn-custom') { container.style.display = "block"; }
+
+        if (e.target.id === 'btn-today') {
+            container.style.display = "none";
+            loadAppointments("today");
+        }
+
+        if (e.target.id === 'btn-upcoming') {
+            container.style.display = "none";
+            loadAppointments("upcoming");
+        }
+
+        if (e.target.id === 'btn-custom') {
+            container.style.display = "block";
+        }
     });
 
+    // Date range filter
     document.getElementById('apply-date-range').onclick = () => {
         const start = document.getElementById('start-date').value;
         const end = document.getElementById('end-date').value;
-        if (start && end) searchAppointments("", start, end); else showToast("Please select both dates", "danger");
+
+        if (start && end) {
+            searchAppointments("", start, end);
+        } else {
+            showToast("Please select both start and end dates", "danger");
+        }
     };
 
-    const performSearch = () => searchAppointments(document.getElementById('search-input').value, "", "");
-    document.getElementById('search-btn').onclick = performSearch;
-    document.getElementById('search-input').onkeypress = e => { if (e.key === "Enter") performSearch(); };
+    // Search functionality
+    const performSearch = () => {
+        const query = document.getElementById('search-input').value;
+        searchAppointments(query, "", "");
+    };
 
+    document.getElementById('search-btn').onclick = performSearch;
+    document.getElementById('search-input').onkeypress = e => {
+        if (e.key === "Enter") performSearch();
+    };
+
+    // Appointment selection
     appointmentListContainer.onclick = e => {
         const item = e.target.closest(".appointment-item");
         if (!item) return;
+
         document.querySelector(".appointment-item.active")?.classList.remove("active");
         item.classList.add("active");
-        selectedAppointment = currentAppointments.find(a => a.appointment_id == item.dataset.appointmentId);
-        if (selectedAppointment) renderPatientDetails(selectedAppointment);
+
+        const appointmentId = item.dataset.appointmentId;
+        selectedAppointment = currentAppointments.find(a => a.appointment_id == appointmentId);
+
+        if (selectedAppointment) {
+            renderPatientDetails(selectedAppointment);
+        }
     };
 
+    // Patient info actions
     patientInfoContainer.onclick = async e => {
-        const action = e.target.closest('button')?.dataset.action;
+        const button = e.target.closest('button');
+        if (!button) return;
+
+        const action = button.dataset.action;
         if (!action || !selectedAppointment) return;
+
         if (action === 'complete') {
             prescribedTreatments = [];
             completionForm.reset();
             renderAddedTreatments();
-            document.getElementById("completion-patient-info").innerHTML = `Completing appointment for <strong>${selectedAppointment.patient_name}</strong>.`;
+
+            document.getElementById("completion-patient-info").innerHTML = `
+                Completing appointment for <strong>${selectedAppointment.patient_name}</strong>.
+            `;
+
             completionModal.show();
         }
+
         if (action === 'view-history') {
-            renderSpinner(historyModalBody); historyModal.show();
-            const history = await authorizedFetch(`/api/doctor/patients/${selectedAppointment.patient_id}/history`);
+            renderSpinner(historyModalBody);
+            historyModal.show();
+
+            const history = await authorizedFetch(
+                `/api/doctor/patients/${selectedAppointment.patient_id}/history`
+            );
             renderHistoryModal(history, selectedAppointment.patient_name);
         }
     };
 
-    document.getElementById('add-treatment-btn').onclick = () => {
-        const select = document.getElementById("treatment-select");
-        const priceInput = document.getElementById("treatment-price");
-        if (!select.value) { showToast("Please select a treatment.", 'danger'); return; }
-        const option = select.options[select.selectedIndex];
-        prescribedTreatments.push({ service_code: select.value, name: option.text.split(' ($')[0], actual_price: parseFloat(priceInput.value || option.dataset.price) });
-        renderAddedTreatments();
-        select.value = ''; priceInput.value = '';
-    };
-
+    // Treatment selection - auto-populate price
     document.getElementById("treatment-select").onchange = e => {
-        const price = e.target.options[e.target.selectedIndex].dataset.price;
-        document.getElementById("treatment-price").value = price || '';
-    };
+        const priceInput = document.getElementById("treatment-price");
+        if (!priceInput) return;
 
-    document.getElementById("added-treatments-list").onclick = e => {
-        const btn = e.target.closest('button[data-index]');
-        if (btn) { prescribedTreatments.splice(parseInt(btn.dataset.index, 10), 1); renderAddedTreatments(); }
-    };
-
-    completionForm.onsubmit = async e => {
-        e.preventDefault();
-        const data = { consultation_notes: document.getElementById("consultation_notes").value, treatments: prescribedTreatments };
-        if (!data.consultation_notes) { showToast("Consultation notes are required.", 'danger'); return; }
-
-        const result = await authorizedFetch(`/api/doctor/appointments/${selectedAppointment.appointment_id}/complete`, { method: 'POST', body: JSON.stringify(data) });
-        if (result !== null) {
-            completionModal.hide(); showToast("Appointment completed successfully.");
-            loadAppointments(document.getElementById('btn-today').checked ? 'today' : 'upcoming'); // Refresh current view
+        const selectedOption = e.target.options[e.target.selectedIndex];
+        if (selectedOption && selectedOption.dataset.price) {
+            priceInput.value = selectedOption.dataset.price;
+        } else {
+            priceInput.value = '';
         }
     };
 
-    document.getElementById('logout-button').onclick = () => { localStorage.removeItem('clinicProToken'); window.location.href = 'login.html'; };
+    // Add treatment button
+    document.getElementById('add-treatment-btn').onclick = () => {
+        const select = document.getElementById("treatment-select");
+        const priceInput = document.getElementById("treatment-price");
 
+        if (!select || !priceInput) {
+            showToast("Form elements not found.", 'danger');
+            return;
+        }
+
+        if (!select.value) {
+            showToast("Please select a treatment.", 'danger');
+            return;
+        }
+
+        const price = parseFloat(priceInput.value);
+        if (!price || price <= 0) {
+            showToast("Please enter a valid price.", 'danger');
+            return;
+        }
+
+        const option = select.options[select.selectedIndex];
+        const treatmentName = option.text.split(' ($')[0];
+
+        // Check if treatment already added
+        const alreadyAdded = prescribedTreatments.some(t => t.service_code === select.value);
+        if (alreadyAdded) {
+            showToast("This treatment has already been added.", 'warning');
+            return;
+        }
+
+        prescribedTreatments.push({
+            service_code: select.value,
+            name: treatmentName,
+            actual_price: price,
+            notes: null
+        });
+
+        renderAddedTreatments();
+
+        // Reset form
+        select.value = '';
+        priceInput.value = '';
+
+        showToast(`${treatmentName} added successfully.`, 'success');
+    };
+
+    // Remove treatment
+    document.getElementById("added-treatments-list").onclick = e => {
+        const btn = e.target.closest('button[data-index]');
+        if (btn) {
+            const index = parseInt(btn.dataset.index, 10);
+            if (!isNaN(index) && index >= 0 && index < prescribedTreatments.length) {
+                const removed = prescribedTreatments.splice(index, 1);
+                renderAddedTreatments();
+                showToast(`${removed[0].name} removed.`, 'info');
+            }
+        }
+    };
+
+    // Completion form submit
+    completionForm.onsubmit = async e => {
+        e.preventDefault();
+
+        const consultationNotes = document.getElementById("consultation_notes").value.trim();
+
+        if (!consultationNotes) {
+            showToast("Consultation notes are required.", 'danger');
+            return;
+        }
+
+        if (consultationNotes.length < 10) {
+            showToast("Please provide more detailed consultation notes (at least 10 characters).", 'danger');
+            return;
+        }
+
+        // Treatments are optional, but show confirmation if none added
+        if (prescribedTreatments.length === 0) {
+            const confirmNoTreatments = confirm(
+                "No treatments have been added. This will be recorded as a consultation only. Continue?"
+            );
+            if (!confirmNoTreatments) return;
+        }
+
+        const data = {
+            consultation_notes: consultationNotes,
+            treatments: prescribedTreatments
+        };
+
+        const submitBtn = e.target.querySelector('button[type="submit"]');
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Processing...';
+        }
+
+        const result = await authorizedFetch(
+            `/api/doctor/appointments/${selectedAppointment.appointment_id}/complete`,
+            { method: 'POST', body: JSON.stringify(data) }
+        );
+
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = 'Mark as Completed';
+        }
+
+        if (result !== null) {
+            completionModal.hide();
+            showToast("Appointment completed successfully.", 'success');
+
+            // Refresh the current view
+            const currentFilter = document.querySelector('input[name="btnradio"]:checked');
+            if (currentFilter) {
+                if (currentFilter.id === 'btn-today') {
+                    loadAppointments('today');
+                } else if (currentFilter.id === 'btn-upcoming') {
+                    loadAppointments('upcoming');
+                }
+            }
+
+            // Clear the prescribed treatments array
+            prescribedTreatments = [];
+        }
+    };
+
+    // Logout
+    document.getElementById('logout-button').onclick = () => {
+        localStorage.removeItem('clinicProToken');
+        window.location.href = 'login.html';
+    };
+
+    // Initialize
     loadInitialData();
 });

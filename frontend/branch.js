@@ -158,8 +158,8 @@ document.addEventListener("DOMContentLoaded", () => {
             i => `<tr>
                 <td>#${i.invoice_id}</td>
                 <td>${i.patient_name}</td>
-                <td>$${parseFloat(i.total_amount).toFixed(2)}</td>
-                <td>$${parseFloat(i.due_amount).toFixed(2)}</td>
+                <td>Rs.${parseFloat(i.total_amount).toFixed(2)}</td>
+                <td>Rs.${parseFloat(i.due_amount).toFixed(2)}</td>
                 <td><span class="badge bg-${statusColors[i.status] || 'secondary'}">${i.status}</span></td>
                 <td>${new Date(i.due_date).toLocaleDateString()}</td>
                 <td class="table-actions">
@@ -204,14 +204,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const revenueContainer = document.getElementById('revenue-report');
         if (revenue && revenue.length > 0) {
-            revenueContainer.innerHTML = `<table class="table"><thead><tr><th>Doctor</th><th>Revenue</th></tr></thead><tbody>${revenue.map(r => `<tr><td>${r.doctor_name}</td><td>$${parseFloat(r.total_revenue).toFixed(2)}</td></tr>`).join('')}</tbody></table>`;
+            revenueContainer.innerHTML = `<table class="table"><thead><tr><th>Doctor</th><th>Revenue</th></tr></thead><tbody>${revenue.map(r => `<tr><td>${r.doctor_name}</td><td>Rs.${parseFloat(r.total_revenue).toFixed(2)}</td></tr>`).join('')}</tbody></table>`;
         } else {
             revenueContainer.innerHTML = `<p class="text-muted text-center p-3">No revenue data available.</p>`;
         }
 
         const balancesContainer = document.getElementById('balances-report');
         if (balances && balances.length > 0) {
-            balancesContainer.innerHTML = `<table class="table"><thead><tr><th>Patient</th><th>Invoice ID</th><th>Amount Due</th></tr></thead><tbody>${balances.map(b => `<tr><td>${b.patient_name}</td><td>#${b.invoice_id}</td><td>$${parseFloat(b.due_amount).toFixed(2)}</td></tr>`).join('')}</tbody></table>`;
+            balancesContainer.innerHTML = `<table class="table"><thead><tr><th>Patient</th><th>Invoice ID</th><th>Amount Due</th></tr></thead><tbody>${balances.map(b => `<tr><td>${b.patient_name}</td><td>#${b.invoice_id}</td><td>Rs.${parseFloat(b.due_amount).toFixed(2)}</td></tr>`).join('')}</tbody></table>`;
         } else {
             balancesContainer.innerHTML = `<p class="text-muted text-center p-3">No outstanding balances.</p>`;
         }
@@ -278,6 +278,8 @@ document.addEventListener("DOMContentLoaded", () => {
             navigateTo("dashboard");
         }
     };
+
+
     initializeDashboard();
 });
 

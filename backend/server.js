@@ -621,6 +621,24 @@ app.post("/api/doctor/appointments/:id/complete", authorize(['doctor']), getDoct
         const { id } = req.params;
         const { consultation_notes, treatments } = req.body;
 
+        // Check if appointment is today
+        const [[appointment]] = await connection.query(
+            "SELECT schedule_date FROM Appointment WHERE appointment_id = ? AND doctor_id = ?",
+            [id, req.doctorId]
+        );
+        
+        if (!appointment) {
+            return res.status(404).json({ message: "Appointment not found." });
+        }
+        
+        const apptDate = new Date(appointment.schedule_date);
+        const today = new Date();
+        
+        if (apptDate.toDateString() !== today.toDateString()) {
+            return res.status(400).json({ message: "Can only complete today's appointments." });
+        }
+
+        // Rest of your existing code...
         await connection.query("UPDATE Appointment SET status = 'Completed', consultation_notes = ? WHERE appointment_id = ? AND doctor_id = ?", [consultation_notes, id, req.doctorId]);
 
         if (treatments && treatments.length > 0) {
