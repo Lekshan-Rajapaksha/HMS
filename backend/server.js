@@ -1,4 +1,5 @@
 // server.js
+require('dotenv').config();
 
 const express = require("express");
 const mysql = require("mysql2/promise");
@@ -11,14 +12,14 @@ const PORT = process.env.PORT || 3000;
 
 // --- SECRET KEY (IMPORTANT!) ---
 // In a real app, store this in an environment variable (e.g., process.env.JWT_SECRET)
-const JWT_SECRET = 'your-super-secret-and-long-key-for-security';
+const JWT_SECRET = process.env.JWT_SECRET;
 
 // --- DATABASE CONFIGURATION ---
 const dbConfig = {
-    host: "localhost",
-    user: "root",
-    password: "Lekshan123@", // Replace with your MySQL password
-    database: "hospital_managment", // Replace with your database name
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME,
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0,
@@ -49,8 +50,12 @@ const authorize = (allowedRoles) => {
         try {
             const decoded = jwt.verify(token, JWT_SECRET);
             req.user = decoded; // { userId, role }
-            if (allowedRoles.includes(req.user.role)) {
-                next(); // User has the required role, proceed
+
+            const userRoleLower = req.user.role.toLowerCase();
+            const allowedRolesLower = allowedRoles.map(r => r.toLowerCase());
+
+            if (allowedRolesLower.includes(userRoleLower)) {  // ✅ Using lowercase arrays
+                next();  // User has the required role, proceed
             } else {
                 res.status(403).json({ message: 'Forbidden: You do not have permission.' });
             }
@@ -157,8 +162,8 @@ const createCrudEndpoints = (entityName, tableName, idColumn) => {
 
 // --- API ROUTES ---
 
-// Lists can be accessed by admin, receptionist, and doctor for forms
-app.get("/api/list/:type", authorize(['admin', 'receptionist', 'doctor']), async (req, res) => {
+// Lists can be accessed by admin, receptionist, doctor, and branch manager for forms
+app.get("/api/list/:type", authorize(['admin', 'receptionist', 'doctor', 'branch manager']), async (req, res) => {
     const { type } = req.params;
     let query;
     try {
@@ -200,15 +205,15 @@ app.get("/api/stats/summary", authorize(['admin']), async (req, res) => {
     } catch (err) { handleDatabaseError(res, err); }
 });
 
-// Patients (GET for admin/receptionist, POST/PUT for admin/receptionist, DELETE for admin)
-app.get("/api/patients", authorize(['admin', 'receptionist']), async (req, res) => {
+// Patients (GET for admin/receptionist/manager, POST/PUT for admin/receptionist/manager, DELETE for admin/manager)
+app.get("/api/patients", authorize(['admin', 'receptionist', 'branch manager']), async (req, res) => {
     try {
         const [rows] = await pool.query(`SELECT *, TIMESTAMPDIFF(YEAR, date_of_birth, CURDATE()) AS age FROM Patient ORDER BY name`);
         res.json(rows);
     } catch (err) { handleDatabaseError(res, err); }
 });
 
-app.get("/api/patients/:id", authorize(['admin', 'receptionist']), async (req, res) => {
+app.get("/api/patients/:id", authorize(['admin', 'receptionist', 'branch manager']), async (req, res) => {
     try {
         const [rows] = await pool.query(`SELECT * FROM Patient WHERE patient_id = ?`, [req.params.id]);
         if (rows.length === 0) {
@@ -220,7 +225,7 @@ app.get("/api/patients/:id", authorize(['admin', 'receptionist']), async (req, r
     }
 });
 
-app.post("/api/patients", authorize(['admin', 'receptionist']), async (req, res) => {
+app.post("/api/patients", authorize(['admin', 'receptionist', 'branch manager']), async (req, res) => {
     try {
         const columns = Object.keys(req.body).join(', ');
         const placeholders = '?,'.repeat(Object.keys(req.body).length).slice(0, -1);
@@ -228,7 +233,7 @@ app.post("/api/patients", authorize(['admin', 'receptionist']), async (req, res)
         res.status(201).json({ message: `Patient created successfully` });
     } catch (err) { handleDatabaseError(res, err); }
 });
-app.put("/api/patients/:id", authorize(['admin', 'receptionist']), async (req, res) => {
+app.put("/api/patients/:id", authorize(['admin', 'receptionist', 'branch manager']), async (req, res) => {
     try {
         const updates = Object.keys(req.body).map(key => `${key} = ?`).join(', ');
         await pool.query(`UPDATE Patient SET ${updates} WHERE patient_id = ?`, [...Object.values(req.body), req.params.id]);
@@ -236,7 +241,7 @@ app.put("/api/patients/:id", authorize(['admin', 'receptionist']), async (req, r
     } catch (err) { handleDatabaseError(res, err); }
 });
 
-app.get("/api/patients/:id/details", authorize(['admin', 'receptionist']), async (req, res) => {
+app.get("/api/patients/:id/details", authorize(['admin', 'receptionist', 'branch manager']), async (req, res) => {
     const patientId = req.params.id;
     const connection = await pool.getConnection();
 
@@ -257,9 +262,9 @@ app.get("/api/patients/:id/details", authorize(['admin', 'receptionist']), async
         // 2. Get appointment history with invoice info
         const [historyRows] = await connection.query(
             `SELECT 
-                a.appointment_id, a.schedule_date, a.status,
-                s.name AS doctor_name,
-                i.invoice_id, i.total_amount, i.due_amount, i.status AS invoice_status
+                 a.appointment_id, a.schedule_date, a.status,
+                 s.name AS doctor_name,
+                 i.invoice_id, i.total_amount, i.due_amount, i.status AS invoice_status
              FROM Appointment a
              JOIN Doctor d ON a.doctor_id = d.doctor_id
              JOIN Staff s ON d.staff_id = s.staff_id
@@ -297,7 +302,8 @@ app.get("/api/patients/:id/details", authorize(['admin', 'receptionist']), async
     }
 });
 
-app.delete("/api/patients/:id", authorize(['admin']), async (req, res) => {
+// FIX: Added 'branch manager' to allow deletion. Patient data is global as per system design.
+app.delete("/api/patients/:id", authorize(['admin', 'branch manager']), async (req, res) => {
     try {
         await pool.query(`DELETE FROM Patient WHERE patient_id = ?`, [req.params.id]);
         res.status(204).send();
@@ -413,12 +419,12 @@ app.post("/api/appointments", authorize(['admin', 'receptionist']), async (req, 
     try {
         const columns = Object.keys(req.body).join(', ');
         const placeholders = '?,'.repeat(Object.keys(req.body).length).slice(0, -1);
-        
+
         await pool.query(`INSERT INTO Appointment (${columns}) VALUES (${placeholders})`, Object.values(req.body));
-        
+
         res.status(201).json({ message: `Appointment created successfully` });
-    } catch (err) { 
-        handleDatabaseError(res, err); 
+    } catch (err) {
+        handleDatabaseError(res, err);
     }
 });
 
@@ -434,7 +440,7 @@ app.put("/api/appointments/:id", authorize(['admin', 'receptionist']), async (re
         // Check if this is a reschedule or a general update
         if (requestBody.status === 'Rescheduled' && requestBody.schedule_date) {
             const newDate = new Date(requestBody.schedule_date).toISOString().slice(0, 19).replace('T', ' ');
-            
+
             const [[staffMember]] = await connection.query('SELECT staff_id FROM Staff WHERE user_id = ?', [userId]);
             const [[currentAppointment]] = await connection.query('SELECT schedule_date FROM Appointment WHERE appointment_id = ?', [appointmentId]);
 
@@ -446,7 +452,7 @@ app.put("/api/appointments/:id", authorize(['admin', 'receptionist']), async (re
                 'INSERT INTO rescheduled_appointments (previous_appointment_id, previous_date, new_date, rescheduled_by_staff_id, reschedule_reason) VALUES (?, ?, ?, ?, ?)',
                 [appointmentId, currentAppointment.schedule_date, newDate, staffMember.staff_id, requestBody.reschedule_reason || null]
             );
-            
+
             await connection.query(
                 "UPDATE Appointment SET schedule_date = ?, reschedule_id = ?, status = 'Rescheduled' WHERE appointment_id = ?",
                 [newDate, logResult.insertId, appointmentId]
@@ -460,7 +466,7 @@ app.put("/api/appointments/:id", authorize(['admin', 'receptionist']), async (re
             const updates = Object.keys(requestBody).map(key => `${key} = ?`).join(', ');
             const values = [...Object.values(requestBody), appointmentId];
             await connection.query(`UPDATE Appointment SET ${updates} WHERE appointment_id = ?`, values);
-            
+
             await connection.commit();
             res.status(200).json({ message: 'Appointment updated successfully' });
         }
@@ -521,7 +527,7 @@ app.post("/api/invoices", authorize(['admin', 'receptionist']), async (req, res)
         await connection.beginTransaction();
 
         const { appointment_id, total_amount, insurance_coverage, issued_date, due_date, initial_payment } = req.body;
-        
+
         if (!appointment_id || !total_amount || !issued_date || !due_date) {
             return res.status(400).json({ message: "Missing required fields for invoice." });
         }
@@ -542,7 +548,7 @@ app.post("/api/invoices", authorize(['admin', 'receptionist']), async (req, res)
                 status = 'Partially Paid';
             }
         }
-        
+
         // Step 1: Create the invoice with calculated amounts and status
         const invoiceData = {
             appointment_id,
@@ -589,11 +595,11 @@ app.put("/api/invoices/:id", authorize(['admin', 'receptionist']), async (req, r
     try {
         const { total_amount, insurance_coverage, status, issued_date, due_date } = req.body;
         const invoiceId = req.params.id;
-        
+
         const total = parseFloat(total_amount);
         const coverage = parseFloat(insurance_coverage) || 0;
         const out_of_pocket_amount = total - coverage;
-        
+
         const updates = {
             total_amount: total,
             insurance_coverage: coverage,
@@ -675,10 +681,25 @@ app.post("/api/staff", authorize(['admin']), async (req, res) => {
     try {
         await connection.beginTransaction();
         const { name, contact_info, branch_id, role_id, username, email, password, is_medical_staff, specialty_id } = req.body;
-        if (!password) {
-            connection.release();
-            return res.status(400).json({ message: "Password is required for new staff." });
+
+        // Security check for Branch Manager: ensure they are not creating an Admin or another Manager
+        if (req.user.role === 'branch manager') {
+            const [[role_to_assign]] = await connection.query("SELECT name FROM Role WHERE role_id = ?", [role_id]);
+            if (!role_to_assign || ['Admin', 'Branch Manager'].includes(role_to_assign.name)) {
+                throw new Error("Branch managers cannot create Admin or other Manager accounts.");
+            }
+
+            // Security check: ensure manager is adding staff to their OWN branch
+            const [[manager_branch]] = await connection.query("SELECT branch_id FROM Staff WHERE user_id = ?", [req.user.userId]);
+            if (!manager_branch || manager_branch.branch_id.toString() !== branch_id.toString()) {
+                throw new Error("You can only add staff to your own branch.");
+            }
         }
+
+        if (!password) {
+            throw new Error("Password is required for new staff.");
+        }
+
         const salt = await bcrypt.genSalt(10);
         const password_hash = await bcrypt.hash(password, salt);
         const [accountResult] = await connection.query("INSERT INTO Account_Info (role_id, username, password_hash, email) VALUES (?, ?, ?, ?)", [role_id, username, password_hash, email]);
@@ -692,6 +713,7 @@ app.post("/api/staff", authorize(['admin']), async (req, res) => {
             const newDoctorId = doctorResult.insertId;
             await connection.query("INSERT INTO doctor_specialties (doctor_id, specialty_id) VALUES (?, ?)", [newDoctorId, specialty_id]);
         }
+
         await connection.commit();
         res.status(201).json({ message: "Staff record created successfully." });
     } catch (err) {
@@ -802,8 +824,8 @@ app.delete("/api/staff/:id", authorize(['admin']), async (req, res) => {
 
 ////////
 app.get("/api/staff/managers", authorize(['admin']), async (req, res) => {
-  try {
-    const [rows] = await pool.query(`
+    try {
+        const [rows] = await pool.query(`
       SELECT s.user_id, s.name
       FROM Staff s
       JOIN Account_Info ai ON s.user_id = ai.user_id
@@ -811,10 +833,10 @@ app.get("/api/staff/managers", authorize(['admin']), async (req, res) => {
       WHERE r.name = 'Branch Manager'
       ORDER BY s.name ASC
     `);
-    res.json(rows);
-  } catch (err) {
-    handleDatabaseError(res, err);
-  }
+        res.json(rows);
+    } catch (err) {
+        handleDatabaseError(res, err);
+    }
 });
 
 ///////
@@ -837,13 +859,13 @@ app.post("/api/payments", authorize(['admin', 'receptionist']), async (req, res)
         if (!invoice_id || !paid_amount || !payment_date || !method_of_payment) {
             return res.status(400).json({ message: "Missing required payment fields." });
         }
-        
+
         // Step 1: Insert the new payment record
         await connection.query(
             "INSERT INTO Payment (invoice_id, paid_amount, payment_date, method_of_payment, status) VALUES (?, ?, ?, ?, ?)",
             [invoice_id, paid_amount, payment_date, method_of_payment, 'Completed']
         );
-        
+
         // Step 2: Update the invoice's due amount
         await connection.query(
             "UPDATE Invoice SET due_amount = due_amount - ? WHERE invoice_id = ?",
@@ -863,13 +885,13 @@ app.post("/api/payments", authorize(['admin', 'receptionist']), async (req, res)
         } else if (updatedInvoice.due_amount < updatedInvoice.out_of_pocket_amount) {
             newStatus = 'Partially Paid';
         }
-        
+
         // Step 5: Update the invoice status
         await connection.query(
             "UPDATE Invoice SET status = ? WHERE invoice_id = ?",
             [newStatus, invoice_id]
         );
-        
+
         await connection.commit();
         res.status(201).json({ message: "Payment recorded successfully" });
 
@@ -988,6 +1010,7 @@ app.get("/api/doctor/patients/:patientId/history", authorize(['doctor']), getDoc
     } catch (err) { handleDatabaseError(res, err); }
 });
 
+// Branch CRUD (Admin only)
 app.get("/api/branches", authorize(['admin']), async (req, res) => {
     try {
         const [rows] = await pool.query(`SELECT * FROM Branch`);
@@ -1112,14 +1135,14 @@ const getBranchInfoFromToken = async (req, res, next) => {
     try {
         const userId = req.user.userId; // This comes from the 'authorize' middleware
         const [rows] = await pool.query(
-            `SELECT branch_id, name as branch_name FROM Branch WHERE manager_user_id = ?`, 
+            `SELECT s.branch_id, b.name as branch_name FROM Staff s JOIN Branch b ON s.branch_id = b.branch_id WHERE s.user_id = ?`,
             [userId]
         );
-        
+
         if (rows.length === 0) {
             return res.status(403).json({ message: "Forbidden: You are not assigned as a manager to any branch." });
         }
-        
+
         req.branchId = rows[0].branch_id;
         req.branchName = rows[0].branch_name;
         next(); // Proceed to the actual route handler
@@ -1127,7 +1150,58 @@ const getBranchInfoFromToken = async (req, res, next) => {
         handleDatabaseError(res, err);
     }
 };
+// GET single staff member details for editing
+app.get("/api/branch-manager/staff/:id", authorize(['branch manager']), getBranchInfoFromToken, async (req, res) => {
+    try {
+        const { branchId } = req;
+        const staffId = req.params.id;
 
+        const [rows] = await pool.query(`
+            SELECT s.staff_id, s.name, s.contact_info, s.is_medical_staff, r.name as role_name 
+            FROM Staff s 
+            JOIN Account_Info ai ON s.user_id = ai.user_id 
+            JOIN Role r ON ai.role_id = r.role_id 
+            WHERE s.staff_id = ? AND s.branch_id = ?
+        `, [staffId, branchId]);
+
+        if (rows.length === 0) {
+            return res.status(404).json({ message: "Staff member not found in your branch." });
+        }
+
+        res.json(rows[0]);
+    } catch (err) {
+        handleDatabaseError(res, err);
+    }
+});
+
+// PUT (update) staff member - only name and contact info
+app.put("/api/branch-manager/staff/:id", authorize(['branch manager']), getBranchInfoFromToken, async (req, res) => {
+    try {
+        const { branchId } = req;
+        const staffId = req.params.id;
+        const { name, contact_info } = req.body;
+
+        // Verify the staff belongs to this branch
+        const [[staff]] = await pool.query(
+            "SELECT staff_id FROM Staff WHERE staff_id = ? AND branch_id = ?",
+            [staffId, branchId]
+        );
+
+        if (!staff) {
+            return res.status(404).json({ message: "Staff member not found in your branch." });
+        }
+
+        // Only allow updating name and contact_info
+        await pool.query(
+            "UPDATE Staff SET name = ?, contact_info = ? WHERE staff_id = ?",
+            [name, contact_info, staffId]
+        );
+
+        res.status(200).json({ message: "Staff member updated successfully." });
+    } catch (err) {
+        handleDatabaseError(res, err);
+    }
+});
 // GET the profile information for the logged-in manager
 app.get("/api/branch-manager/profile", authorize(['branch manager']), getBranchInfoFromToken, async (req, res) => {
     try {
@@ -1137,7 +1211,8 @@ app.get("/api/branch-manager/profile", authorize(['branch manager']), getBranchI
         }
         res.json({
             staff_name: staffRows[0].name,
-            branch_name: req.branchName // Fetched from middleware
+            branch_name: req.branchName,
+            branch_id: req.branchId // Pass branch_id to frontend
         });
     } catch (err) {
         handleDatabaseError(res, err);
@@ -1148,11 +1223,22 @@ app.get("/api/branch-manager/profile", authorize(['branch manager']), getBranchI
 app.get("/api/branch-manager/stats", authorize(['branch manager']), getBranchInfoFromToken, async (req, res) => {
     try {
         const { branchId } = req;
-        const [[{ appointments }]] = await pool.query("SELECT COUNT(*) as appointments FROM Appointment WHERE branch_id = ? AND status = 'Scheduled'", [branchId]);
         const [[{ staff }]] = await pool.query("SELECT COUNT(*) as staff FROM Staff WHERE branch_id = ?", [branchId]);
-        const [[{ daily_appointments }]] = await pool.query("SELECT COUNT(*) as daily_appointments FROM Appointment WHERE branch_id = ? AND DATE(schedule_date) = CURDATE()", [branchId]);
-        
-        res.json({ appointments, staff, daily_appointments });
+        const [dailyCounts] = await pool.query(`
+            SELECT 
+                SUM(CASE WHEN status = 'Scheduled' THEN 1 ELSE 0 END) as scheduled_today,
+                SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) as completed_today,
+                SUM(CASE WHEN status = 'Canceled' THEN 1 ELSE 0 END) as canceled_today
+            FROM Appointment 
+            WHERE branch_id = ? AND DATE(schedule_date) = CURDATE()
+        `, [branchId]);
+
+        res.json({
+            staff,
+            scheduled_today: dailyCounts[0].scheduled_today || 0,
+            completed_today: dailyCounts[0].completed_today || 0,
+            canceled_today: dailyCounts[0].canceled_today || 0
+        });
     } catch (err) {
         handleDatabaseError(res, err);
     }
@@ -1207,7 +1293,7 @@ app.get("/api/branch-manager/staff", authorize(['branch manager']), getBranchInf
             FROM Staff s 
             JOIN Account_Info ai ON s.user_id = ai.user_id 
             JOIN Role r ON ai.role_id = r.role_id 
-            WHERE s.branch_id = ? 
+            WHERE s.branch_id = ? and  r.name != 'Branch Manager'
             ORDER BY s.name ASC
         `, [branchId]);
         res.json(rows);
@@ -1233,7 +1319,136 @@ app.get("/api/branch-manager/invoices", authorize(['branch manager']), getBranch
         handleDatabaseError(res, err);
     }
 });
+// GET Doctor-wise revenue report
+app.get("/api/branch-manager/reports/doctor-revenue", authorize(['branch manager']), getBranchInfoFromToken, async (req, res) => {
+    try {
+        const { branchId } = req;
+        const [rows] = await pool.query(`
+            SELECT 
+                s.name as doctor_name, 
+                SUM(i.total_amount) as total_revenue
+            FROM Invoice i
+            JOIN Appointment a ON i.appointment_id = a.appointment_id
+            JOIN Doctor d ON a.doctor_id = d.doctor_id
+            JOIN Staff s ON d.staff_id = s.staff_id
+            WHERE a.branch_id = ? AND i.status = 'Paid'
+            GROUP BY s.staff_id, s.name
+            ORDER BY total_revenue DESC
+        `, [branchId]);
+        res.json(rows);
+    } catch (err) {
+        handleDatabaseError(res, err);
+    }
+});
 
+// GET Patients with outstanding balances
+app.get("/api/branch-manager/reports/outstanding-balances", authorize(['branch manager']), getBranchInfoFromToken, async (req, res) => {
+    try {
+        const { branchId } = req;
+        const [rows] = await pool.query(`
+            SELECT
+                p.name as patient_name,
+                i.invoice_id,
+                i.due_amount
+            FROM Invoice i
+            JOIN Appointment a ON i.appointment_id = a.appointment_id
+            JOIN Patient p ON a.patient_id = p.patient_id
+            WHERE a.branch_id = ? AND i.status IN ('Pending', 'Partially Paid') AND i.due_amount > 0
+            ORDER BY p.name
+        `, [branchId]);
+        res.json(rows);
+    } catch (err) {
+        handleDatabaseError(res, err);
+    }
+});
+// FIX: This endpoint was taking limited fields. It's now updated to accept the same fields as the global /api/payments endpoint for consistency.
+// POST a new payment for an invoice
+app.post("/api/branch-manager/invoices/:invoiceId/payments", authorize(['branch manager']), getBranchInfoFromToken, async (req, res) => {
+    const { invoiceId } = req.params;
+    const { paid_amount, payment_date, method_of_payment } = req.body;
+
+    if (!paid_amount || isNaN(paid_amount) || paid_amount <= 0 || !payment_date || !method_of_payment) {
+        return res.status(400).json({ message: "Invalid payment data provided." });
+    }
+
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        // 1. Check if the invoice belongs to the manager's branch
+        const [invoiceRows] = await connection.query(`
+            SELECT i.total_amount, i.status, i.out_of_pocket_amount, i.due_amount
+            FROM Invoice i
+            JOIN Appointment a ON i.appointment_id = a.appointment_id
+            WHERE i.invoice_id = ? AND a.branch_id = ?
+        `, [invoiceId, req.branchId]);
+
+        if (invoiceRows.length === 0) {
+            await connection.rollback();
+            return res.status(404).json({ message: "Invoice not found or does not belong to your branch." });
+        }
+        if (invoiceRows[0].status === 'Paid') {
+            await connection.rollback();
+            return res.status(400).json({ message: "This invoice is already fully paid." });
+        }
+
+        // 2. Record the payment
+        await connection.query(
+            "INSERT INTO Payment (invoice_id, paid_amount, payment_date, method_of_payment, status) VALUES (?, ?, ?, ?, ?)",
+            [invoiceId, paid_amount, payment_date, method_of_payment, 'Completed']
+        );
+
+        // 3. Update the invoice's due amount
+        await connection.query(
+            "UPDATE Invoice SET due_amount = due_amount - ? WHERE invoice_id = ?",
+            [paid_amount, invoiceId]
+        );
+
+        // 4. Get the updated due_amount to determine the new status
+        const [[{ due_amount, out_of_pocket_amount }]] = await connection.query("SELECT due_amount, out_of_pocket_amount FROM Invoice WHERE invoice_id = ?", [invoiceId]);
+
+        // 5. Update invoice status
+        let newStatus = 'Pending';
+        if (due_amount <= 0) {
+            newStatus = 'Paid';
+        } else if (due_amount < out_of_pocket_amount) {
+            newStatus = 'Partially Paid';
+        }
+
+        await connection.query("UPDATE Invoice SET status = ? WHERE invoice_id = ?", [newStatus, invoiceId]);
+
+        await connection.commit();
+        res.status(201).json({ message: "Payment recorded successfully", newStatus });
+
+    } catch (err) {
+        await connection.rollback();
+        handleDatabaseError(res, err);
+    } finally {
+        connection.release();
+    }
+});
+
+// FIX: New branch-scoped endpoint for deleting appointments securely.
+app.delete("/api/branch-manager/appointments/:id", authorize(['branch manager']), getBranchInfoFromToken, async (req, res) => {
+    try {
+        const appointmentId = req.params.id;
+        const { branchId } = req;
+
+        // Verify the appointment belongs to the manager's branch before deleting
+        const [result] = await pool.query(
+            `DELETE FROM Appointment WHERE appointment_id = ? AND branch_id = ?`,
+            [appointmentId, branchId]
+        );
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({ message: "Appointment not found in your branch or already deleted." });
+        }
+
+        res.status(204).send();
+    } catch (err) {
+        handleDatabaseError(res, err);
+    }
+});
 
 // Note: For Patients, we are not filtering by branch as the schema doesn't link them directly.
 // A manager can manage all patients, similar to a receptionist.
@@ -1245,3 +1460,4 @@ app.get("/api/branch-manager/invoices", authorize(['branch manager']), getBranch
 app.listen(PORT, () => {
     console.log(`🚀 Server is running on http://localhost:${PORT}`);
 });
+
