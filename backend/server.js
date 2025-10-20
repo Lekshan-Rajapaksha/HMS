@@ -633,6 +633,7 @@ app.get("/api/doctors", authorize(['admin']), async (req, res) => {
     } catch (err) { handleDatabaseError(res, err); }
 });
 
+
 // Staff (Admin Only)
 app.get("/api/staff", authorize(['admin']), async (req, res) => {
     try {
@@ -640,6 +641,35 @@ app.get("/api/staff", authorize(['admin']), async (req, res) => {
         res.json(rows);
     } catch (err) { handleDatabaseError(res, err); }
 });
+
+// ✅ **NEW**: Get a single staff member for the edit form
+app.get("/api/staff/:id", authorize(['admin']), async (req, res) => {
+    try {
+        const [rows] = await pool.query(`
+            SELECT
+                s.staff_id, s.name, s.contact_info, s.is_medical_staff, s.branch_id,
+                ai.user_id, ai.username, ai.email, ai.role_id,
+                r.name as role_name,
+                ds.specialty_id
+            FROM Staff s
+            JOIN Account_Info ai ON s.user_id = ai.user_id
+            JOIN Role r ON ai.role_id = r.role_id
+            LEFT JOIN Doctor d ON s.staff_id = d.staff_id
+            LEFT JOIN doctor_specialties ds ON d.doctor_id = ds.doctor_id
+            WHERE s.staff_id = ?
+        `, [req.params.id]);
+
+        if (rows.length === 0) {
+            return res.status(404).json({ message: "Staff member not found" });
+        }
+        // Convert is_medical_staff from 0/1 to boolean for easier checkbox handling
+        rows[0].is_medical_staff = !!rows[0].is_medical_staff; 
+        res.json(rows[0]);
+    } catch (err) {
+        handleDatabaseError(res, err);
+    }
+});
+
 app.post("/api/staff", authorize(['admin']), async (req, res) => {
     const connection = await pool.getConnection();
     try {
@@ -668,6 +698,103 @@ app.post("/api/staff", authorize(['admin']), async (req, res) => {
         await connection.rollback();
         console.error("Error creating staff:", err);
         res.status(500).json({ message: err.message || "An internal server error occurred." });
+    } finally {
+        connection.release();
+    }
+});
+
+
+// ✅ **NEW**: Update an existing staff member
+app.put("/api/staff/:id", authorize(['admin']), async (req, res) => {
+    const connection = await pool.getConnection();
+    const staffId = req.params.id;
+    try {
+        await connection.beginTransaction();
+
+        const { name, contact_info, branch_id, role_id, username, email, password, is_medical_staff, specialty_id } = req.body;
+
+        const [[existingStaff]] = await connection.query(`
+            SELECT s.user_id, d.doctor_id, r.name as role_name
+            FROM Staff s
+            JOIN Account_Info ai ON s.user_id = ai.user_id
+            JOIN Role r ON ai.role_id = r.role_id
+            LEFT JOIN Doctor d ON s.staff_id = d.staff_id
+            WHERE s.staff_id = ?`, [staffId]);
+
+        if (!existingStaff) throw new Error("Staff member not found.");
+        const { user_id, doctor_id, role_name: oldRoleName } = existingStaff;
+        
+        const [[newRole]] = await connection.query('SELECT name FROM Role WHERE role_id = ?', [role_id]);
+        if (!newRole) throw new Error("Invalid role selected.");
+        const newRoleName = newRole.name;
+
+        // Update Account_Info table
+        const accountUpdates = { role_id, username, email };
+        if (password) {
+            const salt = await bcrypt.genSalt(10);
+            accountUpdates.password_hash = await bcrypt.hash(password, salt);
+        }
+        await connection.query(`UPDATE Account_Info SET ? WHERE user_id = ?`, [accountUpdates, user_id]);
+
+        // Update Staff table
+        await connection.query("UPDATE Staff SET name = ?, contact_info = ?, is_medical_staff = ?, branch_id = ? WHERE staff_id = ?",
+            [name, contact_info, is_medical_staff === '1', branch_id, staffId]);
+
+        // Handle Doctor role changes
+        const wasDoctor = oldRoleName === 'Doctor';
+        const isDoctor = newRoleName === 'Doctor';
+
+        if (isDoctor && !wasDoctor) { // Promoted to Doctor
+            if (!specialty_id) throw new Error("A specialty is required for the 'Doctor' role.");
+            const [docResult] = await connection.query("INSERT INTO Doctor (staff_id) VALUES (?)", [staffId]);
+            await connection.query("INSERT INTO doctor_specialties (doctor_id, specialty_id) VALUES (?, ?)", [docResult.insertId, specialty_id]);
+        } else if (!isDoctor && wasDoctor) { // Demoted from Doctor
+            await connection.query("DELETE FROM doctor_specialties WHERE doctor_id = ?", [doctor_id]);
+            await connection.query("DELETE FROM Doctor WHERE doctor_id = ?", [doctor_id]);
+        } else if (isDoctor && wasDoctor) { // Was and is a Doctor, update specialty
+            if (!specialty_id) throw new Error("A specialty is required for the 'Doctor' role.");
+            await connection.query("UPDATE doctor_specialties SET specialty_id = ? WHERE doctor_id = ?", [specialty_id, doctor_id]);
+        }
+
+        await connection.commit();
+        res.status(200).json({ message: "Staff record updated successfully." });
+    } catch (err) {
+        await connection.rollback();
+        console.error("Error updating staff:", err);
+        res.status(500).json({ message: err.message || "An internal server error occurred." });
+    } finally {
+        connection.release();
+    }
+});
+
+// ✅ **NEW**: Delete a staff member
+app.delete("/api/staff/:id", authorize(['admin']), async (req, res) => {
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
+        const staffId = req.params.id;
+
+        const [[staffInfo]] = await connection.query(`SELECT s.user_id, d.doctor_id FROM Staff s LEFT JOIN Doctor d ON s.staff_id = d.staff_id WHERE s.staff_id = ?`, [staffId]);
+        if (!staffInfo) { // Already deleted or never existed
+            await connection.commit();
+            return res.status(204).send();
+        }
+        
+        const { user_id, doctor_id } = staffInfo;
+
+        if (doctor_id) { // If they are a doctor, delete dependencies first
+            await connection.query("DELETE FROM doctor_specialties WHERE doctor_id = ?", [doctor_id]);
+            await connection.query("DELETE FROM Doctor WHERE doctor_id = ?", [doctor_id]);
+        }
+
+        await connection.query("DELETE FROM Staff WHERE staff_id = ?", [staffId]);
+        await connection.query("DELETE FROM Account_Info WHERE user_id = ?", [user_id]);
+
+        await connection.commit();
+        res.status(204).send();
+    } catch (err) {
+        await connection.rollback();
+        handleDatabaseError(res, err);
     } finally {
         connection.release();
     }
