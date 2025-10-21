@@ -945,6 +945,7 @@ app.get("/api/branch-manager/reports/outstanding-balances", authorize(['branch m
     } catch (err) { handleDatabaseError(res, err); }
 });
 
-app.listen(port, host, () => {
-  console.log(`Server is running on ${host}:${port}`);
+// KEEP THIS BLOCK AT THE END OF YOUR FILE
+app.listen(PORT, host, () => {
+    console.log(`🚀 Server is running on ${host}:${PORT}`);
 });
