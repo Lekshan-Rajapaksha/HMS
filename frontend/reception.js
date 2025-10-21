@@ -1,5 +1,5 @@
 // reception.js
-const API_BASE_URL = "http://localhost:3000";
+const API_BASE_URL = "https://hms-production-a5ad.up.railway.app";
 const authToken = localStorage.getItem('clinicProToken');
 if (!authToken) window.location.href = '/login.html';
 
