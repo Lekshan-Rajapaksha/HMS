@@ -1,5 +1,5 @@
 // branch.js
-const API_BASE_URL = "http://localhost:3000";
+const API_BASE_URL = "https://hms-production-a5ad.up.railway.app";
 
 document.addEventListener("DOMContentLoaded", () => {
     const token = localStorage.getItem('clinicProToken');
