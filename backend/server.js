@@ -1011,16 +1011,51 @@ app.post("/api/login/patient", async (req, res) => {
 // --- NEW: GET Available Doctors (for Patients) ---
 app.get("/api/patient/doctors", authorize(['patient']), async (req, res) => {
     try {
-        // This query is safe to share with patients
         const [rows] = await pool.query(`
-            SELECT d.doctor_id, s.name, sp.name as specialty 
+            SELECT 
+                d.doctor_id, 
+                s.name, 
+                sp.name as specialty,
+                b.branch_id,        -- <-- ADDED
+                b.name as branch_name -- <-- ADDED
             FROM Doctor d 
             JOIN Staff s ON d.staff_id = s.staff_id 
+            JOIN Branch b ON s.branch_id = b.branch_id  -- <-- ADDED
             LEFT JOIN doctor_specialties ds ON d.doctor_id = ds.doctor_id 
             LEFT JOIN Specialties sp ON ds.specialty_id = sp.specialty_id 
-            ORDER BY s.name
+            ORDER BY b.name, s.name  -- <-- UPDATED ORDER
         `);
         res.json(rows);
+    } catch (err) { 
+        handleDatabaseError(res, err); 
+    }
+});
+
+// ADD THIS NEW ENDPOINT to server.js
+app.get("/api/patient/my-appointments", authorize(['patient']), async (req, res) => {
+    try {
+        const patientId = req.user.patientId;
+        if (!patientId) {
+            return res.status(403).json({ message: 'Invalid patient token.' });
+        }
+
+        const [rows] = await pool.query(`
+            SELECT 
+                a.appointment_id,
+                a.schedule_date,
+                a.status,
+                s.name as doctor_name,
+                b.name as branch_name
+            FROM Appointment a
+            JOIN Doctor d ON a.doctor_id = d.doctor_id
+            JOIN Staff s ON d.staff_id = s.staff_id
+            JOIN Branch b ON a.branch_id = b.branch_id
+            WHERE a.patient_id = ?
+            ORDER BY a.schedule_date DESC
+        `, [patientId]);
+        
+        res.json(rows);
+
     } catch (err) { 
         handleDatabaseError(res, err); 
     }
