@@ -946,6 +946,127 @@ app.get("/api/branch-manager/reports/outstanding-balances", authorize(['branch m
     } catch (err) { handleDatabaseError(res, err); }
 });
 
+// =========================================================================================
+// --- PATIENT-SPECIFIC API Endpoints ---
+// =========================================================================================
+
+// --- NEW PATIENT LOGIN ENDPOINT ---
+app.post("/api/login/patient", async (req, res) => {
+    const { username, password } = req.body; // username = "Anura", password = "03151"
+    if (!username || !password) {
+        return res.status(400).json({ message: "Username and password are required." });
+    }
+
+    try {
+        // Find all patients whose first name matches the 'username'
+        const [rows] = await pool.query(
+            "SELECT patient_id, name, date_of_birth FROM Patient WHERE name LIKE ?",
+            [username + '%']
+        );
+
+        if (rows.length === 0) {
+            return res.status(401).json({ message: "Invalid credentials." });
+        }
+
+        let authenticatedPatient = null;
+
+        // Loop through matches (e.g., "Anura D." and "Anura P.")
+        for (const patient of rows) {
+            const dob = new Date(patient.date_of_birth);
+            
+            // Format month and day to be 2 digits (e.g., '03', '15')
+            const month = String(dob.getMonth() + 1).padStart(2, '0');
+            const day = String(dob.getDate()).padStart(2, '0');
+            
+            // Build the derived password: MM + DD + ID
+            const derivedPassword = `${month}${day}${patient.patient_id}`;
+
+            // Check if it matches the password from the app
+            if (derivedPassword === password) {
+                authenticatedPatient = patient;
+                break; // Found our patient
+            }
+        }
+
+        if (authenticatedPatient) {
+            // Success! Create a JWT for this patient
+            const token = jwt.sign(
+                // Note the different payload: { patientId, role }
+                { patientId: authenticatedPatient.patient_id, role: 'patient' },
+                JWT_SECRET,
+                { expiresIn: '8h' }
+            );
+            // Return the lowercase role 'patient'
+            res.json({ message: "Login successful", token, role: 'patient' });
+        } else {
+            // Loop finished, no match found
+            res.status(401).json({ message: "Invalid credentials." });
+        }
+
+    } catch (err) {
+        handleDatabaseError(res, err);
+    }
+});
+
+// --- NEW: GET Available Doctors (for Patients) ---
+app.get("/api/patient/doctors", authorize(['patient']), async (req, res) => {
+    try {
+        // This query is safe to share with patients
+        const [rows] = await pool.query(`
+            SELECT d.doctor_id, s.name, sp.name as specialty 
+            FROM Doctor d 
+            JOIN Staff s ON d.staff_id = s.staff_id 
+            LEFT JOIN doctor_specialties ds ON d.doctor_id = ds.doctor_id 
+            LEFT JOIN Specialties sp ON ds.specialty_id = sp.specialty_id 
+            ORDER BY s.name
+        `);
+        res.json(rows);
+    } catch (err) { 
+        handleDatabaseError(res, err); 
+    }
+});
+
+// --- NEW: GET Patient's Own Documents (for Patients) ---
+app.get("/api/patient/my-documents", authorize(['patient']), async (req, res) => {
+    try {
+        // Get the patientId from the token's payload
+        const patientId = req.user.patientId; 
+        if (!patientId) {
+            return res.status(403).json({ message: 'Invalid patient token.' });
+        }
+
+        // Query that combines invoices and consultation notes
+        const [rows] = await pool.query(`
+            (
+                SELECT 
+                    i.invoice_id as id, 
+                    'Invoice' as type, 
+                    i.issued_date as date, 
+                    CONCAT('Total: $', i.total_amount, ' / Due: $', i.due_amount) as details
+                FROM Invoice i
+                JOIN Appointment a ON i.appointment_id = a.appointment_id
+                WHERE a.patient_id = ?
+            )
+            UNION
+            (
+                SELECT 
+                    a.appointment_id as id,
+                    'Consultation' as type,
+                    a.schedule_date as date,
+                    a.consultation_notes as details
+                FROM Appointment a
+                WHERE a.patient_id = ? AND a.status = 'Completed' AND a.consultation_notes IS NOT NULL
+            )
+            ORDER BY date DESC
+        `, [patientId, patientId]);
+        
+        res.json(rows);
+
+    } catch (err) { 
+        handleDatabaseError(res, err); 
+    }
+});
+
 // KEEP THIS BLOCK AT THE END OF YOUR FILE
 app.listen(PORT, host, () => {
     console.log(`🚀 Server is running on ${host}:${PORT}`);
