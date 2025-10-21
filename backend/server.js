@@ -291,9 +291,17 @@ app.put("/api/branches/:id", authorize(['admin']), async (req, res) => {
 });
 
 // ADMIN STAFF MANAGEMENT
+// ADMIN STAFF MANAGEMENT (SECURE VERSION)
 app.get("/api/staff", authorize(['admin']), async (req, res) => {
     try {
-        const [rows] = await pool.query(`SELECT s.*, r.name as role_name, b.name as branch_name FROM Staff s LEFT JOIN Account_Info ai ON s.user_id = ai.user_id LEFT JOIN Role r ON ai.role_id = r.role_id LEFT JOIN Branch b ON s.branch_id = b.branch_id ORDER BY s.name`);
+        const [rows] = await pool.query(`
+            SELECT s.*, r.name as role_name, COALESCE(b.name, 'Unassigned') as branch_name 
+            FROM Staff s 
+            LEFT JOIN Account_Info ai ON s.user_id = ai.user_id 
+            LEFT JOIN Role r ON ai.role_id = r.role_id 
+            LEFT JOIN Branch b ON s.branch_id = b.branch_id 
+            ORDER BY branch_name, role_name, s.name
+        `);
         res.json(rows);
     } catch (err) { handleDatabaseError(res, err); }
 });
@@ -337,7 +345,157 @@ app.post("/api/staff", authorize(['admin', 'branch manager']), async (req, res) 
         connection.release();
     }
 });
+app.get("/api/staff/:id", authorize(['admin']), async (req, res) => {
+    try {
+        const [rows] = await pool.query(`
+            SELECT 
+                s.staff_id, s.name, s.contact_info, s.branch_id, s.is_medical_staff,
+                ai.role_id, ai.username, ai.email,
+                ds.specialty_id
+            FROM Staff s 
+            LEFT JOIN Account_Info ai ON s.user_id = ai.user_id
+            LEFT JOIN Doctor d ON s.staff_id = d.staff_id
+            LEFT JOIN doctor_specialties ds ON d.doctor_id = ds.doctor_id
+            WHERE s.staff_id = ?
+        `, [req.params.id]);
 
+        if (rows.length === 0) {
+            return res.status(404).json({ message: "Staff not found" });
+        }
+        res.json(rows[0]);
+    } catch (err) {
+        handleDatabaseError(res, err);
+    }
+});
+
+// [AND ADD THIS CODE BLOCK]
+// UPDATE Staff (Admin)
+app.put("/api/staff/:id", authorize(['admin']), async (req, res) => {
+    const connection = await pool.getConnection();
+    const staffId = req.params.id;
+    const { name, contact_info, branch_id, is_medical_staff, role_id, username, email, specialty_id, password } = req.body;
+
+    try {
+        await connection.beginTransaction();
+
+        // 1. Get the user_id from staff_id
+        const [[staff]] = await connection.query("SELECT user_id FROM Staff WHERE staff_id = ?", [staffId]);
+        if (!staff) {
+            throw new Error("Staff not found.");
+        }
+        const userId = staff.user_id;
+
+        // 2. Update Staff table
+        await connection.query(
+            "UPDATE Staff SET name = ?, contact_info = ?, branch_id = ?, is_medical_staff = ? WHERE staff_id = ?",
+            [name, contact_info, branch_id, is_medical_staff === '1', staffId]
+        );
+
+        // 3. Update Account_Info table (with optional password)
+        let accountQuery = "UPDATE Account_Info SET role_id = ?, username = ?, email = ? WHERE user_id = ?";
+        let accountParams = [role_id, username, email, userId];
+
+        if (password) { // Check if a new password was provided
+            const password_hash = await bcrypt.hash(password, 10);
+            accountQuery = "UPDATE Account_Info SET role_id = ?, username = ?, email = ?, password_hash = ? WHERE user_id = ?";
+            accountParams = [role_id, username, email, password_hash, userId];
+        }
+        await connection.query(accountQuery, accountParams);
+
+        // 4. Handle Doctor/Specialty
+        const [[roleCheck]] = await connection.query("SELECT name FROM Role WHERE role_id = ?", [role_id]);
+        if (roleCheck.name.toLowerCase() === 'doctor') {
+            if (!specialty_id) {
+                throw new Error("A specialty is required for a doctor.");
+            }
+
+            // Check if doctor record exists
+            const [[doctor]] = await connection.query("SELECT doctor_id FROM Doctor WHERE staff_id = ?", [staffId]);
+
+            let doctorId;
+            if (!doctor) {
+                // Create doctor record if it doesn't exist
+                const [docResult] = await connection.query("INSERT INTO Doctor (staff_id) VALUES (?)", [staffId]);
+                doctorId = docResult.insertId;
+            } else {
+                doctorId = doctor.doctor_id;
+            }
+
+            // Update specialty (delete old, insert new for simplicity)
+            await connection.query("DELETE FROM doctor_specialties WHERE doctor_id = ?", [doctorId]);
+            await connection.query("INSERT INTO doctor_specialties (doctor_id, specialty_id) VALUES (?, ?)", [doctorId, specialty_id]);
+        }
+
+        await connection.commit();
+        res.status(200).json({ message: "Staff member updated successfully." });
+
+    } catch (err) {
+        await connection.rollback();
+        handleDatabaseError(res, err);
+    } finally {
+        connection.release();
+    }
+});
+// DELETE Staff (Admin)
+app.delete("/api/staff/:id", authorize(['admin']), async (req, res) => {
+    const connection = await pool.getConnection();
+    const staffId = req.params.id;
+
+    try {
+        await connection.beginTransaction();
+
+        // 1. Get user_id from staff_id
+        const [[staff]] = await connection.query("SELECT user_id FROM Staff WHERE staff_id = ?", [staffId]);
+        if (!staff) {
+            throw new Error("Staff not found.");
+        }
+        const userId = staff.user_id;
+
+        // 2. Check if they are a manager of a branch
+        const [[managerCheck]] = await connection.query("SELECT branch_id FROM Branch WHERE manager_user_id = ?", [userId]);
+        if (managerCheck) {
+            throw new Error(`Cannot delete staff. They are the manager of branch ${managerCheck.branch_id}. Please reassign the branch manager first.`);
+        }
+
+        // 3. Check if they are a doctor and delete doctor-related records
+        const [[doctor]] = await connection.query("SELECT doctor_id FROM Doctor WHERE staff_id = ?", [staffId]);
+        if (doctor) {
+            const doctorId = doctor.doctor_id;
+
+            // Delete from doctor_specialties
+            await connection.query("DELETE FROM doctor_specialties WHERE doctor_id = ?", [doctorId]);
+
+            // Delete from Doctor. This will fail if the trigger `PreventDoctorDeletionWithAppointments` finds future appointments.
+            await connection.query("DELETE FROM Doctor WHERE doctor_id = ?", [doctorId]);
+        }
+
+        // 4. Delete from Staff
+        await connection.query("DELETE FROM Staff WHERE staff_id = ?", [staffId]);
+
+        // 5. Delete from Account_Info
+        await connection.query("DELETE FROM Account_Info WHERE user_id = ?", [userId]);
+
+        await connection.commit();
+        res.status(204).send(); // Success, no content
+
+    } catch (err) {
+        await connection.rollback();
+        // Check for specific errors
+        if (err.sqlState === '45000') { // Custom error from trigger
+            return res.status(409).json({ message: err.message }); // e.g., "Cannot delete doctor. They have future appointments."
+        }
+        if (err.errno === 1451) { // Foreign key constraint violation
+            return res.status(409).json({ message: "Cannot delete staff. They are referenced by other records (e.g., appointment logs)." });
+        }
+        // Send the specific error message from our checks (e.g., manager check)
+        if (err.message.startsWith("Cannot delete staff")) {
+            return res.status(409).json({ message: err.message });
+        }
+        handleDatabaseError(res, err);
+    } finally {
+        connection.release();
+    }
+});
 
 // =========================================================================================
 // --- RECEPTIONIST & BRANCH MANAGER SHARED API Endpoints ---
@@ -626,14 +784,14 @@ app.post("/api/doctor/appointments/:id/complete", authorize(['doctor']), getDoct
             "SELECT schedule_date FROM Appointment WHERE appointment_id = ? AND doctor_id = ?",
             [id, req.doctorId]
         );
-        
+
         if (!appointment) {
             return res.status(404).json({ message: "Appointment not found." });
         }
-        
+
         const apptDate = new Date(appointment.schedule_date);
         const today = new Date();
-        
+
         if (apptDate.toDateString() !== today.toDateString()) {
             return res.status(400).json({ message: "Can only complete today's appointments." });
         }

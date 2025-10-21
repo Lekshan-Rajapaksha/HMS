@@ -122,12 +122,103 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     const renderPatientsTable = data => renderTable(data, ["ID", "Name", "Age", "Contact"], p => `<tr><td>${p.patient_id}</td><td>${p.name}</td><td>${p.age}</td><td>${p.contact_info || ""}</td><td class="table-actions"><button class="btn btn-sm btn-outline-secondary" data-action="edit" data-type="patient" data-id="${p.patient_id}"><i class="bi bi-pencil-fill"></i></button></td></tr>`, "No patients found.");
-    const renderStaffTable = data => renderTable(data, ["ID", "Name", "Role", "Branch"], s => `<tr><td>${s.staff_id}</td><td>${s.name} ${s.is_medical_staff ? '<i class="bi bi-heart-pulse text-primary" title="Medical Staff"></i>' : ""}</td><td>${s.role_name}</td><td>${s.branch_name || 'N/A'}</td><td class="table-actions"><button class="btn btn-sm btn-outline-secondary" data-action="edit" data-type="staff" data-id="${s.staff_id}"><i class="bi bi-pencil-fill"></i></button></td></tr>`, "No staff found.");
     const renderBranchesTable = data => renderTable(data, ["ID", "Name", "Address", "Contact"], b => `<tr><td>${b.branch_id}</td><td>${b.name}</td><td>${b.address || ''}</td><td>${b.contact_number || ''}</td><td class="table-actions"><button class="btn btn-sm btn-outline-secondary" data-action="edit" data-type="branch" data-id="${b.branch_id}"><i class="bi bi-pencil-fill"></i></button></td></tr>`, "No branches found.");
     const renderProvidersTable = data => renderTable(data, ["ID", "Name", "Contact Number"], i => `<tr><td>${i.id}</td><td>${i.name}</td><td>${i.contact_number}</td><td class="table-actions"><button class="btn btn-sm btn-outline-secondary" data-action="edit" data-type="insurance-provider" data-id="${i.id}"><i class="bi bi-pencil-fill"></i></button></td></tr>`, "No insurance providers found.");
     const renderTreatmentsTable = data => renderTable(data, ["Code", "Name", "Price"], t => `<tr><td>${t.service_code}</td><td>${t.name}</td><td>Rs.${parseFloat(t.price).toFixed(2)}</td><td class="table-actions"><button class="btn btn-sm btn-outline-secondary" data-action="edit" data-type="treatment" data-id="${t.service_code}"><i class="bi bi-pencil-fill"></i></button></td></tr>`, "No treatments found.");
     const renderSpecialtiesTable = data => renderTable(data, ["ID", "Name", "Description"], s => `<tr><td>${s.specialty_id}</td><td>${s.name}</td><td>${s.description || ''}</td><td class="table-actions"><button class="btn btn-sm btn-outline-secondary" data-action="edit" data-type="specialty" data-id="${s.specialty_id}"><i class="bi bi-pencil-fill"></i></button></td></tr>`, "No specialties found.");
+    // [ADD THIS NEW FUNCTION]
+    const renderStaffAccordions = (data) => {
+        const container = document.getElementById("staff-accordion-container");
+        if (!container) return;
 
+        if (!data || data.length === 0) {
+            container.innerHTML = `<div class="text-center p-5 text-muted">No staff found.</div>`;
+            return;
+        }
+
+        // 1. Group by Branch
+        const branches = {};
+        data.forEach(staff => {
+            if (!branches[staff.branch_name]) {
+                branches[staff.branch_name] = [];
+            }
+            branches[staff.branch_name].push(staff);
+        });
+
+        let accordionHTML = '<div class="accordion" id="staff-accordion">';
+        let firstBranch = true;
+
+        // 2. Loop through branches to create accordion items
+        for (const branchName in branches) {
+            const staffInBranch = branches[branchName];
+            const accordionId = `branch-${branchName.replace(/\s+/g, '-')}`;
+
+            // Group staff in this branch by role
+            const roles = {};
+            staffInBranch.forEach(staff => {
+                if (!roles[staff.role_name]) {
+                    roles[staff.role_name] = [];
+                }
+                roles[staff.role_name].push(staff);
+            });
+
+            accordionHTML += `
+            <div class="accordion-item">
+                <h2 class="accordion-header" id="heading-${accordionId}">
+                    <button class="accordion-button ${firstBranch ? '' : 'collapsed'}" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-${accordionId}">
+                        ${branchName} <span class="badge bg-primary ms-2">${staffInBranch.length} Staff</span>
+                    </button>
+                </h2>
+                <div id="collapse-${accordionId}" class="accordion-collapse collapse ${firstBranch ? 'show' : ''}" data-bs-parent="#staff-accordion">
+                    <div class="accordion-body">
+        `;
+
+            // 3. Loop through roles to create tables
+            for (const roleName in roles) {
+                const staffInRole = roles[roleName];
+                accordionHTML += `<h5 class="role-subheader">${roleName}s</h5>`;
+                accordionHTML += `
+                <div class="table-responsive mb-3">
+                    <table class="table table-sm table-hover">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Name</th>
+                                <th>Contact</th>
+                                <th>Username</th>
+                                <th>Email</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+            `;
+                // 4. Add staff members as rows
+                staffInRole.forEach(s => {
+                    accordionHTML += `
+                    <tr>
+                        <td>${s.staff_id}</td>
+                        <td>${s.name} ${s.is_medical_staff ? '<i class="bi bi-heart-pulse text-primary" title="Medical Staff"></i>' : ""}</td>
+                        <td>${s.contact_info || ''}</td>
+                        <td>${s.username || ''}</td>
+                        <td>${s.email || ''}</td>
+                        <td class="table-actions">
+                            <button class="btn btn-sm btn-outline-secondary" data-action="edit" data-type="staff" data-id="${s.staff_id}"><i class="bi bi-pencil-fill"></i></button>
+                            <button class="btn btn-sm btn-outline-danger" data-action="delete" data-type="staff" data-id="${s.staff_id}"><i class="bi bi-trash-fill"></i></button>
+                        </td>
+                    </tr>
+                `;
+                });
+
+                accordionHTML += `</tbody></table></div>`;
+            }
+
+            accordionHTML += `</div></div></div>`;
+            firstBranch = false;
+        }
+
+        accordionHTML += `</div>`;
+        container.innerHTML = accordionHTML;
+    };
     // --- PAGE LOADERS ---
     const loadDashboard = async () => {
         renderSpinner();
@@ -170,12 +261,43 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     const loadPatientsPage = async () => { createPageTemplate({ title: "Patients", type: "patient", headers: ["ID", "Name", "Age", "Contact"] }); renderSpinner(document.getElementById('table-body')); currentViewData = await authorizedFetch("/api/patients"); renderPatientsTable(currentViewData); setupSearch(renderPatientsTable, ['patient_id', 'name', 'contact_info']); };
-    const loadStaffPage = async () => { createPageTemplate({ title: "Staff", type: "staff", headers: ["ID", "Name", "Role", "Branch"] }); renderSpinner(document.getElementById('table-body')); currentViewData = await authorizedFetch("/api/staff"); renderStaffTable(currentViewData); setupSearch(renderStaffTable, ['staff_id', 'name', 'role_name', 'branch_name']); };
     const loadBranchesPage = async () => { createPageTemplate({ title: "Branches", type: "branch", headers: ["ID", "Name", "Address", "Contact"] }); renderSpinner(document.getElementById('table-body')); currentViewData = await authorizedFetch("/api/branches"); renderBranchesTable(currentViewData); setupSearch(renderBranchesTable, ['branch_id', 'name', 'address']); };
     const loadInsuranceProvidersPage = async () => { createPageTemplate({ title: "Insurance Providers", type: "insurance-provider", headers: ["ID", "Name", "Contact"] }); renderSpinner(document.getElementById('table-body')); currentViewData = await authorizedFetch("/api/insurance-providers"); renderProvidersTable(currentViewData); setupSearch(renderProvidersTable, ['id', 'name']); };
     const loadTreatmentsPage = async () => { createPageTemplate({ title: "Treatment Catalogue", type: "treatment", headers: ["Code", "Name", "Price"] }); renderSpinner(document.getElementById('table-body')); currentViewData = await authorizedFetch("/api/treatments"); renderTreatmentsTable(currentViewData); setupSearch(renderTreatmentsTable, ['service_code', 'name']); };
     const loadSpecialtiesPage = async () => { createPageTemplate({ title: "Doctor Specialties", type: "specialty", headers: ["ID", "Name", "Description"] }); renderSpinner(document.getElementById('table-body')); currentViewData = await authorizedFetch("/api/specialties"); renderSpecialtiesTable(currentViewData); setupSearch(renderSpecialtiesTable, ['name', 'description']); };
+    // [WITH THIS]
+    const loadStaffPage = async () => {
+        // 1. Manually create the page structure (no createPageTemplate)
+        mainContent.innerHTML = `
+        <div class="page-header">
+            <h1>Staff Management</h1>
+            <div class="d-flex align-items-center gap-2">
+                <div class="search-wrapper">
+                    <input type="search" id="search-input" class="form-control" placeholder="Search staff...">
+                </div>
+                <button class="btn btn-primary" data-action="add" data-type="staff">
+                    <i class="bi bi-plus-lg me-1"></i> Add Staff
+                </button>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-body">
+                <div id="staff-accordion-container"></div>
+            </div>
+        </div>
+    `;
 
+        // 2. Show spinner, fetch data
+        const container = document.getElementById("staff-accordion-container");
+        renderSpinner(container);
+        currentViewData = await authorizedFetch("/api/staff");
+
+        // 3. Render the accordion
+        renderStaffAccordions(currentViewData);
+
+        // 4. Setup search
+        setupSearch(renderStaffAccordions, ['name', 'role_name', 'branch_name', 'username', 'email']);
+    };
     // --- FORM HANDLERS ---
     const openPatientForm = async (id = null) => {
         const isEditing = id !== null;
@@ -203,17 +325,78 @@ document.addEventListener("DOMContentLoaded", () => {
         formModal.show();
     };
 
+    // [New openStaffForm function]
     const openStaffForm = async (id = null) => {
-        if (id) { showToast('Editing staff details is not permitted for this role.', 'warning'); return; }
-        const [roles, branches, specialties] = await Promise.all([authorizedFetch("/api/list/roles"), authorizedFetch("/api/list/branches"), authorizedFetch("/api/list/specialties")]);
-        formModalLabel.textContent = "Add New Staff";
-        formModalBody.innerHTML = `<form id="modal-form"><div class="row"><div class="col-md-6 mb-3"><label>Full Name</label><input type="text" name="name" class="form-control" required></div><div class="col-md-6 mb-3"><label>Contact Info</label><input type="text" name="contact_info" class="form-control" required></div><div class="col-md-6 mb-3"><label>Username</label><input type="text" name="username" class="form-control" required></div><div class="col-md-6 mb-3"><label>Email</label><input type="email" name="email" class="form-control" required></div><div class="col-md-6 mb-3"><label>Password</label><input type="password" name="password" class="form-control" required></div><div class="col-md-6 mb-3"><label>Role</label><select name="role_id" class="form-select" required>${createOptions(roles, "role_id", "name")}</select></div><div class="col-md-6 mb-3"><label>Branch</label><select name="branch_id" class="form-select" required>${createOptions(branches, "branch_id", "name")}</select></div><div class="col-md-6 mb-3 d-none" id="specialty-container"><label>Specialty</label><select name="specialty_id" class="form-select">${createOptions(specialties, "specialty_id", "name")}</select></div></div><div class="mb-3 form-check"><input type="checkbox" name="is_medical_staff" class="form-check-input" value="1"><label class="form-check-label">Is Medical Staff</label></div><div class="modal-footer mt-4"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button><button type="submit" class="btn btn-primary">Create</button></div></form>`;
-        formModal.show();
-        const roleSelect = formModalBody.querySelector('[name="role_id"]');
-        roleSelect.onchange = e => document.getElementById('specialty-container').classList.toggle('d-none', e.target.selectedOptions[0].text.toLowerCase() !== 'doctor');
-        document.getElementById("modal-form").onsubmit = e => { e.preventDefault(); submitForm("/api/staff", "POST", Object.fromEntries(new FormData(e.target)), loadStaffPage); };
-    };
+        const isEditing = id !== null;
 
+        // Fetch all required lists and existing staff data (if editing)
+        const [roles, branches, specialties, staffData] = await Promise.all([
+            authorizedFetch("/api/list/roles"),
+            authorizedFetch("/api/list/branches"),
+            authorizedFetch("/api/list/specialties"),
+            isEditing ? authorizedFetch(`/api/staff/${id}`) : Promise.resolve({})
+        ]);
+
+        // Check if fetching data failed
+        if (isEditing && !staffData) {
+            showToast('Could not fetch staff details.', 'danger');
+            return;
+        }
+
+        formModalLabel.textContent = isEditing ? `Edit Staff: ${staffData.name}` : "Add New Staff";
+
+        formModalBody.innerHTML = `<form id="modal-form">
+            <div class="row">
+                <h5>Staff Details</h5>
+                <div class="col-md-6 mb-3"><label>Full Name</label><input type="text" name="name" class="form-control" value="${staffData.name || ''}" required></div>
+                <div class="col-md-6 mb-3"><label>Contact Info</label><input type="text" name="contact_info" class="form-control" value="${staffData.contact_info || ''}" required></div>
+                <div class="col-md-6 mb-3"><label>Branch</label><select name="branch_id" class="form-select" required>${createOptions(branches, "branch_id", "name", staffData.branch_id)}</select></div>
+                <div class="col-md-6 mb-3 pt-3 form-check"><input type="checkbox" name="is_medical_staff" class="form-check-input" value="1" ${staffData.is_medical_staff ? 'checked' : ''}><label class="form-check-label">Is Medical Staff</label></div>
+            </div>
+            <hr>
+            <h5>Account Details</h5>
+            <div class="row">
+                <div class="col-md-6 mb-3"><label>Username</label><input type="text" name="username" class="form-control" value="${staffData.username || ''}" required></div>
+                <div class="col-md-6 mb-3"><label>Email</label><input type="email" name="email" class="form-control" value="${staffData.email || ''}" required></div>
+                <div class="col-md-6 mb-3"><label>Role</label><select name="role_id" class="form-select" required>${createOptions(roles, "role_id", "name", staffData.role_id)}</select></div>
+                <div class="col-md-6 mb-3 d-none" id="specialty-container"><label>Specialty</label><select name="specialty_id" class="form-select">${createOptions(specialties, "specialty_id", "name", staffData.specialty_id)}</select></div>
+                <div class="col-md-6 mb-3"><label>Password</label><input type="password" name="password" class="form-control" placeholder="${isEditing ? 'Leave blank to keep unchanged' : ''}" ${!isEditing ? 'required' : ''}></div>
+            </div>
+            <div class="modal-footer mt-4"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button><button type="submit" class="btn btn-primary">Save</button></div>
+        </form>`;
+
+        formModal.show();
+
+        const roleSelect = formModalBody.querySelector('[name="role_id"]');
+        const specialtyContainer = document.getElementById('specialty-container');
+
+        // Function to show/hide specialty dropdown based on role
+        const toggleSpecialty = () => {
+            const selectedRoleText = roleSelect.options[roleSelect.selectedIndex]?.text.toLowerCase();
+            specialtyContainer.classList.toggle('d-none', selectedRoleText !== 'doctor');
+        };
+
+        roleSelect.onchange = toggleSpecialty;
+        toggleSpecialty(); // Run on form load
+
+        // Handle form submission
+        document.getElementById("modal-form").onsubmit = e => {
+            e.preventDefault();
+            const data = Object.fromEntries(new FormData(e.target));
+
+            // On edit, if password field is empty, don't send it
+            if (isEditing && !data.password) {
+                delete data.password;
+            }
+
+            submitForm(
+                isEditing ? `/api/staff/${id}` : "/api/staff",
+                isEditing ? "PUT" : "POST",
+                data,
+                loadStaffPage
+            );
+        };
+    };
     const openSimpleForm = async (type, id = null) => {
         const isEditing = id !== null;
         const data = isEditing ? await authorizedFetch(`/api/${type}s/${id}`) : {};
@@ -267,6 +450,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
         if (action === "add" || action === "edit") {
             entityMap[type]?.handler(id);
+        }
+        if (action === "delete" && type === "staff") {
+            deleteItem(`/api/staff/${id}`, 'staff member', loadStaffPage);
         }
     });
 
