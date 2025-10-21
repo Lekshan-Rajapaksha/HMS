@@ -22,10 +22,11 @@ if (!JWT_SECRET) {
 
 // --- DATABASE CONFIGURATION ---
 const dbConfig = {
-    host: process.env.DB_HOST || 'localhost',
-    user: process.env.DB_USER || 'root',
-    password: process.env.DB_PASSWORD || '',
-    database: process.env.DB_NAME || 'catms',
+    host: process.env.MYSQL_HOST,
+    user: process.env.MYSQL_USER,
+    password: process.env.MYSQL_PASSWORD,
+    database: process.env.MYSQL_DATABASE,
+    port: process.env.MYSQL_PORT, // <-- Don't forget the port
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0,

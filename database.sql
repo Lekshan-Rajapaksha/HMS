@@ -2,10 +2,49 @@
 -- COMPLETE CLINIC MANAGEMENT DATABASE
 -- WITH SCHEMA, TRIGGERS, PROCEDURES, VIEWS & SAMPLE DATA
 -- ============================================
+-- ============================================
+-- DROP EXISTING OBJECTS (IF EXIST)
+-- ============================================
 
-DROP DATABASE IF EXISTS catms;
-CREATE DATABASE catms;
-USE catms;
+-- Disable foreign key checks temporarily to avoid constraint errors
+SET FOREIGN_KEY_CHECKS = 0;
+
+-- Drop views if they exist
+DROP VIEW IF EXISTS vw_insurance_analysis;
+DROP VIEW IF EXISTS vw_treatment_statistics;
+DROP VIEW IF EXISTS vw_patients_outstanding;
+DROP VIEW IF EXISTS vw_doctor_revenue;
+DROP VIEW IF EXISTS vw_branch_appointment_summary;
+
+-- Drop stored procedures if they exist
+DROP PROCEDURE IF EXISTS CalculateInvoiceFromTreatments;
+
+-- Drop triggers if they exist
+DROP TRIGGER IF EXISTS UpdateInvoiceStatusAfterPayment;
+DROP TRIGGER IF EXISTS PreventDoctorDeletionWithAppointments;
+DROP TRIGGER IF EXISTS PreventOverlappingAppointmentsOnUpdate;
+DROP TRIGGER IF EXISTS PreventOverlappingAppointments;
+
+-- Drop tables in reverse order of dependencies
+DROP TABLE IF EXISTS Insurance_Claim;
+DROP TABLE IF EXISTS Payment;
+DROP TABLE IF EXISTS Invoice;
+DROP TABLE IF EXISTS Appointment_Treatment;
+DROP TABLE IF EXISTS Treatment_Catalogue;
+DROP TABLE IF EXISTS rescheduled_appointments;
+DROP TABLE IF EXISTS Appointment;
+DROP TABLE IF EXISTS Patient;
+DROP TABLE IF EXISTS Insurance_Provider;
+DROP TABLE IF EXISTS doctor_specialties;
+DROP TABLE IF EXISTS Doctor;
+DROP TABLE IF EXISTS Specialties;
+DROP TABLE IF EXISTS Staff;
+DROP TABLE IF EXISTS Branch;
+DROP TABLE IF EXISTS Account_Info;
+DROP TABLE IF EXISTS Role;
+
+-- Re-enable foreign key checks
+SET FOREIGN_KEY_CHECKS = 1;
 
 -- ============================================
 -- TABLE DEFINITIONS
@@ -195,10 +234,7 @@ CREATE INDEX idx_payment_date ON Payment(payment_date);
 -- TRIGGERS
 -- ============================================
 
-DELIMITER $$
-
 -- Prevent Overlapping Appointments (INSERT)
-DROP TRIGGER IF EXISTS PreventOverlappingAppointments$$
 CREATE TRIGGER PreventOverlappingAppointments
 BEFORE INSERT ON Appointment
 FOR EACH ROW
@@ -215,10 +251,9 @@ BEGIN
         SIGNAL SQLSTATE '45000'
         SET MESSAGE_TEXT = 'This doctor already has an appointment at this time.';
     END IF;
-END$$
+END;
 
 -- Prevent Overlapping Appointments (UPDATE)
-DROP TRIGGER IF EXISTS PreventOverlappingAppointmentsOnUpdate$$
 CREATE TRIGGER PreventOverlappingAppointmentsOnUpdate
 BEFORE UPDATE ON Appointment
 FOR EACH ROW
@@ -238,10 +273,9 @@ BEGIN
             SET MESSAGE_TEXT = 'This doctor already has an appointment at this time.';
         END IF;
     END IF;
-END$$
+END;
 
 -- Prevent Doctor Deletion with Future Appointments
-DROP TRIGGER IF EXISTS PreventDoctorDeletionWithAppointments$$
 CREATE TRIGGER PreventDoctorDeletionWithAppointments
 BEFORE DELETE ON Doctor
 FOR EACH ROW
@@ -256,10 +290,9 @@ BEGIN
         SIGNAL SQLSTATE '45000'
         SET MESSAGE_TEXT = 'Cannot delete doctor. They have future appointments scheduled.';
     END IF;
-END$$
+END;
 
 -- Update Invoice Status After Payment
-DROP TRIGGER IF EXISTS UpdateInvoiceStatusAfterPayment$$
 CREATE TRIGGER UpdateInvoiceStatusAfterPayment
 AFTER INSERT ON Payment
 FOR EACH ROW
@@ -278,18 +311,13 @@ BEGIN
     ELSEIF total_paid > 0 THEN
         UPDATE Invoice SET status = 'Partially Paid' WHERE invoice_id = NEW.invoice_id;
     END IF;
-END$$
-
-DELIMITER ;
+END;
 
 -- ============================================
 -- STORED PROCEDURES
 -- ============================================
 
-DELIMITER $$
-
 -- Calculate Invoice From Treatments
-DROP PROCEDURE IF EXISTS CalculateInvoiceFromTreatments$$
 CREATE PROCEDURE CalculateInvoiceFromTreatments(
     IN p_appointment_id INT,
     IN p_insurance_coverage DECIMAL(10,2),
@@ -345,9 +373,7 @@ BEGIN
         INSERT INTO Payment (invoice_id, paid_amount, payment_date, method_of_payment, status)
         VALUES (p_invoice_id, p_initial_payment, NOW(), 'Initial Payment', 'Completed');
     END IF;
-END$$
-
-DELIMITER ;
+END;
 
 -- ============================================
 -- VIEWS FOR REPORTING
@@ -483,7 +509,6 @@ INSERT INTO Treatment_Catalogue (service_code, name, description, price) VALUES
 
 -- Insert Admin Account
 INSERT INTO Account_Info (role_id, username, password_hash, email) VALUES
-
 (1, 'lekshan', '$2b$10$xxoSo8xwOQoFzGjnb9O/oOaL8xCypg75Maam2YEgmZEcY7P6i0jly', 'llekshan@gmail.com');
 -- Password: admin123
 
@@ -544,6 +569,7 @@ INSERT INTO Staff (user_id, name, contact_info, is_medical_staff, branch_id) VAL
 (13, 'Dr. Nimali Wickramasinghe', '0772134567', TRUE, 3);
 
 -- Insert Doctors
+-- Corrected to reference only staff members who are doctors (staff_id 7 through 12)
 INSERT INTO Doctor (staff_id) VALUES
 (7), (8), (9), (10), (11), (12);
 
@@ -727,3 +753,4 @@ INSERT INTO Insurance_Claim (invoice_id, insurance_provider_id, claimed_amount, 
 -- ============================================
 
 COMMIT;
+
