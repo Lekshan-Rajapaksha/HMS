@@ -9,6 +9,11 @@ const bcrypt = require('bcryptjs');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const host = '0.0.0.0'; // Listen on all network interfaces
+
+app.listen(port, host, () => {
+  console.log(`Server is running on ${host}:${port}`);
+});
 
 // --- SECRET KEY (IMPORTANT!) ---
 const JWT_SECRET = process.env.JWT_SECRET;
