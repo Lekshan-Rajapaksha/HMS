@@ -296,3 +296,15 @@ h6 {
 .role-subheader:first-of-type {
   margin-top: 0;
 }
+
+.chart-container {
+  position: relative;
+  height: 350px;
+  width: 100%;
+}
+
+@media (max-width: 768px) {
+  .chart-container {
+    height: 300px;
+  }
+}

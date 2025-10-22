@@ -12,11 +12,15 @@ document.addEventListener("DOMContentLoaded", () => {
     const navLinks = document.querySelectorAll(".nav-link");
     const toastContainer = document.querySelector(".toast-container");
     const formModal = new bootstrap.Modal(document.getElementById("formModal"));
+    const detailsModal = new bootstrap.Modal(document.getElementById("detailsModal"));
     const formModalLabel = document.getElementById("formModalLabel");
     const formModalBody = document.getElementById("formModalBody");
+    const detailsModalLabel = document.getElementById("detailsModalLabel");
+    const detailsModalBody = document.getElementById("detailsModalBody");
 
     let currentViewData = [];
     let userProfile = {};
+    let chartInstances = { revenue: null, arrivals: null };
 
     const showToast = (message, type = 'success') => {
         const toastId = 'toast-' + Math.random().toString(36).substring(2, 9);
@@ -122,18 +126,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 <div class="col-xl-3 col-md-6 mb-4"><div class="card"><div class="card-body"><div class="d-flex align-items-center"><i class="bi bi-people-fill fs-2 text-info me-3"></i><div><div class="text-muted">Total Staff</div><div class="h5 fw-bold">${stats.staff}</div></div></div></div></div></div>
             </div>
             <div class="row mt-4">
-                <div class="col-lg-6 mb-4">
-                    <div class="card">
-                        <div class="card-header">Yearly Revenue Overview</div>
-                        <div class="card-body" id="yearly-revenue-container"></div>
-                    </div>
-                </div>
-                <div class="col-lg-6 mb-4">
-                    <div class="card">
-                        <div class="card-header">Patient Arrivals (Monthly)</div>
-                        <div class="card-body" id="patient-arrivals-container"></div>
-                    </div>
-                </div>
+                <div class="col-lg-6 mb-4"><div class="card"><div class="card-header">Yearly Revenue Trend</div><div class="card-body"><div class="chart-container"><canvas id="yearly-revenue-chart"></canvas></div></div></div></div>
+                <div class="col-lg-6 mb-4"><div class="card"><div class="card-header">Patient Arrivals (Monthly)</div><div class="card-body"><div class="chart-container"><canvas id="patient-arrivals-chart"></canvas></div></div></div></div>
             </div>`;
         
         const [yearlyRevenue, patientArrivals] = await Promise.all([
@@ -141,19 +135,140 @@ document.addEventListener("DOMContentLoaded", () => {
             authorizedFetch('/api/branch-manager/reports/patient-arrivals')
         ]);
         
-        const yearlyRevenueContainer = document.getElementById('yearly-revenue-container');
         if (yearlyRevenue && yearlyRevenue.length > 0) {
-            yearlyRevenueContainer.innerHTML = `<div style="max-height: 300px; overflow-y: auto;"><table class="table table-sm"><thead><tr><th>Month</th><th>Total Revenue</th><th>Paid</th><th>Pending</th></tr></thead><tbody>${yearlyRevenue.map(r => `<tr><td>${r.month}</td><td>Rs.${parseFloat(r.total_revenue || 0).toFixed(2)}</td><td>Rs.${parseFloat(r.paid_revenue || 0).toFixed(2)}</td><td>Rs.${parseFloat(r.pending_revenue || 0).toFixed(2)}</td></tr>`).join('')}</tbody></table></div>`;
-        } else {
-            yearlyRevenueContainer.innerHTML = `<p class="text-muted text-center p-3">No revenue data available for this year.</p>`;
+            renderYearlyRevenueChart(yearlyRevenue);
         }
-        
-        const patientArrivalsContainer = document.getElementById('patient-arrivals-container');
         if (patientArrivals && patientArrivals.length > 0) {
-            patientArrivalsContainer.innerHTML = `<div style="max-height: 300px; overflow-y: auto;"><table class="table table-sm"><thead><tr><th>Month</th><th>Unique Patients</th><th>Appointments</th><th>Completed</th></tr></thead><tbody>${patientArrivals.map(p => `<tr><td>${p.month}</td><td>${p.unique_patients}</td><td>${p.total_appointments}</td><td>${p.completed}</td></tr>`).join('')}</tbody></table></div>`;
-        } else {
-            patientArrivalsContainer.innerHTML = `<p class="text-muted text-center p-3">No patient arrival data available for this year.</p>`;
+            renderPatientArrivalsChart(patientArrivals);
         }
+    };
+
+    const renderYearlyRevenueChart = (data) => {
+        const ctx = document.getElementById('yearly-revenue-chart');
+        if (!ctx) return;
+
+        if (chartInstances.revenue) chartInstances.revenue.destroy();
+
+        const months = data.map(d => d.month);
+        const totalRevenue = data.map(d => parseFloat(d.total_revenue || 0));
+        const paidRevenue = data.map(d => parseFloat(d.paid_revenue || 0));
+        const pendingRevenue = data.map(d => parseFloat(d.pending_revenue || 0));
+
+        chartInstances.revenue = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: months,
+                datasets: [
+                    {
+                        label: 'Total Revenue',
+                        data: totalRevenue,
+                        borderColor: '#6a5af9',
+                        backgroundColor: 'rgba(106, 90, 249, 0.1)',
+                        tension: 0.4,
+                        fill: true,
+                        pointRadius: 5,
+                        pointBackgroundColor: '#6a5af9'
+                    },
+                    {
+                        label: 'Paid',
+                        data: paidRevenue,
+                        borderColor: '#28a745',
+                        backgroundColor: 'rgba(40, 167, 69, 0.1)',
+                        tension: 0.4,
+                        fill: false,
+                        borderDash: [5, 5],
+                        pointRadius: 4,
+                        pointBackgroundColor: '#28a745'
+                    },
+                    {
+                        label: 'Pending',
+                        data: pendingRevenue,
+                        borderColor: '#dc3545',
+                        backgroundColor: 'rgba(220, 53, 69, 0.1)',
+                        tension: 0.4,
+                        fill: false,
+                        borderDash: [5, 5],
+                        pointRadius: 4,
+                        pointBackgroundColor: '#dc3545'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'top', labels: { usePointStyle: true, padding: 15 } },
+                    tooltip: { backgroundColor: 'rgba(0,0,0,0.8)', padding: 12, titleFont: { size: 14 }, bodyFont: { size: 13 } }
+                },
+                scales: {
+                    y: { beginAtZero: true, ticks: { callback: (value) => 'Rs.' + value.toFixed(0) } }
+                }
+            }
+        });
+    };
+
+    const renderPatientArrivalsChart = (data) => {
+        const ctx = document.getElementById('patient-arrivals-chart');
+        if (!ctx) return;
+
+        if (chartInstances.arrivals) chartInstances.arrivals.destroy();
+
+        const months = data.map(d => d.month);
+        const uniquePatients = data.map(d => d.unique_patients);
+        const totalAppointments = data.map(d => d.total_appointments);
+        const completed = data.map(d => d.completed);
+
+        chartInstances.arrivals = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: months,
+                datasets: [
+                    {
+                        label: 'Unique Patients',
+                        data: uniquePatients,
+                        borderColor: '#17a2b8',
+                        backgroundColor: 'rgba(23, 162, 184, 0.1)',
+                        tension: 0.4,
+                        fill: true,
+                        pointRadius: 5,
+                        pointBackgroundColor: '#17a2b8'
+                    },
+                    {
+                        label: 'Total Appointments',
+                        data: totalAppointments,
+                        borderColor: '#ffc107',
+                        backgroundColor: 'rgba(255, 193, 7, 0.1)',
+                        tension: 0.4,
+                        fill: false,
+                        borderDash: [5, 5],
+                        pointRadius: 4,
+                        pointBackgroundColor: '#ffc107'
+                    },
+                    {
+                        label: 'Completed',
+                        data: completed,
+                        borderColor: '#28a745',
+                        backgroundColor: 'rgba(40, 167, 69, 0.1)',
+                        tension: 0.4,
+                        fill: false,
+                        borderDash: [5, 5],
+                        pointRadius: 4,
+                        pointBackgroundColor: '#28a745'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'top', labels: { usePointStyle: true, padding: 15 } },
+                    tooltip: { backgroundColor: 'rgba(0,0,0,0.8)', padding: 12, titleFont: { size: 14 }, bodyFont: { size: 13 } }
+                },
+                scales: {
+                    y: { beginAtZero: true, ticks: { stepSize: 1 } }
+                }
+            }
+        });
     };
 
     const renderAppointmentsTable = (data) => {
@@ -213,98 +328,412 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     const loadReportsPage = async () => {
-        mainContent.innerHTML = `<h1>Branch Reports</h1><p class="text-muted">Comprehensive analytics and insights for your branch operations.</p>`;
-        
-        const [revenue, balances, branchSummary, treatmentStats, insuranceAnalysis] = await Promise.all([
-            authorizedFetch('/api/branch-manager/reports/doctor-revenue'),
-            authorizedFetch('/api/branch-manager/reports/outstanding-balances'),
-            authorizedFetch('/api/branch-manager/reports/branch-summary'),
-            authorizedFetch('/api/branch-manager/reports/treatment-stats'),
-            authorizedFetch('/api/branch-manager/reports/insurance-analysis')
-        ]);
-        
-        mainContent.innerHTML += `
-            <div class="row">
-                <div class="col-lg-6 mb-4">
-                    <div class="card">
-                        <div class="card-header">Doctor Revenue (Paid Invoices)</div>
+        mainContent.innerHTML = `
+            <h1>Reports</h1>
+            <p class="text-muted">Select a report to view details and analysis.</p>
+            <div class="row g-3">
+                <div class="col-lg-6">
+                    <div class="card report-card h-100" data-report="doctor-revenue" style="cursor: pointer; border-left: 4px solid #28a745;">
                         <div class="card-body">
-                            <div class="table-responsive" id="revenue-report"></div>
+                            <div class="d-flex align-items-start justify-content-between mb-2">
+                                <div>
+                                    <h5 class="card-title fw-bold mb-1">Doctor Revenue Report</h5>
+                                    <p class="card-text text-muted small mb-0">Track revenue generated by each doctor with performance metrics.</p>
+                                </div>
+                                <i class="bi bi-person-hearts fs-5 text-success"></i>
+                            </div>
+                            <div class="mt-3 pt-2 border-top">
+                                <span class="badge bg-light text-dark">Revenue Tracking</span>
+                            </div>
                         </div>
                     </div>
                 </div>
-                <div class="col-lg-6 mb-4">
-                    <div class="card">
-                        <div class="card-header">Patients with Outstanding Balances</div>
+                <div class="col-lg-6">
+                    <div class="card report-card h-100" data-report="outstanding-balances" style="cursor: pointer; border-left: 4px solid #dc3545;">
                         <div class="card-body">
-                           <div class="table-responsive" id="balances-report"></div>
+                            <div class="d-flex align-items-start justify-content-between mb-2">
+                                <div>
+                                    <h5 class="card-title fw-bold mb-1">Outstanding Balances</h5>
+                                    <p class="card-text text-muted small mb-0">Monitor patients with pending or overdue payments.</p>
+                                </div>
+                                <i class="bi bi-person-exclamation fs-5 text-danger"></i>
+                            </div>
+                            <div class="mt-3 pt-2 border-top">
+                                <span class="badge bg-light text-dark">Payment Tracking</span>
+                            </div>
                         </div>
                     </div>
                 </div>
-            </div>
-            <div class="row">
-                <div class="col-lg-6 mb-4">
-                    <div class="card">
-                        <div class="card-header">Appointment Summary</div>
+                <div class="col-lg-6">
+                    <div class="card report-card h-100" data-report="branch-summary" style="cursor: pointer; border-left: 4px solid #ffc107;">
                         <div class="card-body">
-                           <div class="table-responsive" id="summary-report"></div>
+                            <div class="d-flex align-items-start justify-content-between mb-2">
+                                <div>
+                                    <h5 class="card-title fw-bold mb-1">Appointment Summary</h5>
+                                    <p class="card-text text-muted small mb-0">View daily appointment statistics with detailed breakdown.</p>
+                                </div>
+                                <i class="bi bi-calendar-check fs-5 text-warning"></i>
+                            </div>
+                            <div class="mt-3 pt-2 border-top">
+                                <span class="badge bg-light text-dark">Daily Metrics</span>
+                            </div>
                         </div>
                     </div>
                 </div>
-                <div class="col-lg-6 mb-4">
-                    <div class="card">
-                        <div class="card-header">Treatment Statistics</div>
+                <div class="col-lg-6">
+                    <div class="card report-card h-100" data-report="treatment-stats" style="cursor: pointer; border-left: 4px solid #6f42c1;">
                         <div class="card-body">
-                           <div class="table-responsive" id="treatment-report"></div>
+                            <div class="d-flex align-items-start justify-content-between mb-2">
+                                <div>
+                                    <h5 class="card-title fw-bold mb-1">Treatment Statistics</h5>
+                                    <p class="card-text text-muted small mb-0">Analyze treatment utilization and revenue trends.</p>
+                                </div>
+                                <i class="bi bi-card-list fs-5 text-secondary"></i>
+                            </div>
+                            <div class="mt-3 pt-2 border-top">
+                                <span class="badge bg-light text-dark">Service Analysis</span>
+                            </div>
                         </div>
                     </div>
                 </div>
-            </div>
-            <div class="row">
-                <div class="col-lg-12 mb-4">
-                    <div class="card">
-                        <div class="card-header">Insurance Coverage Analysis</div>
+                <div class="col-lg-6">
+                    <div class="card report-card h-100" data-report="insurance-analysis" style="cursor: pointer; border-left: 4px solid #17a2b8;">
                         <div class="card-body">
-                           <div class="table-responsive" id="insurance-report"></div>
+                            <div class="d-flex align-items-start justify-content-between mb-2">
+                                <div>
+                                    <h5 class="card-title fw-bold mb-1">Insurance Coverage Analysis</h5>
+                                    <p class="card-text text-muted small mb-0">Review insurance claims and coverage patterns.</p>
+                                </div>
+                                <i class="bi bi-shield-check fs-5 text-info"></i>
+                            </div>
+                            <div class="mt-3 pt-2 border-top">
+                                <span class="badge bg-light text-dark">Coverage Insights</span>
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>`;
+        
+        mainContent.addEventListener('click', (e) => {
+            const reportCard = e.target.closest('.report-card');
+            if (reportCard) {
+                const reportType = reportCard.dataset.report;
+                loadReportDetail(reportType);
+            }
+        });
+    };
 
-        const revenueContainer = document.getElementById('revenue-report');
-        if (revenue && revenue.length > 0) {
-            revenueContainer.innerHTML = `<table class="table"><thead><tr><th>Doctor</th><th>Revenue</th></tr></thead><tbody>${revenue.map(r => `<tr><td>${r.doctor_name}</td><td>Rs.${parseFloat(r.total_revenue).toFixed(2)}</td></tr>`).join('')}</tbody></table>`;
-        } else {
-            revenueContainer.innerHTML = `<p class="text-muted text-center p-3">No revenue data available.</p>`;
+    const loadReportDetail = async (reportType) => {
+        detailsModalLabel.textContent = 'Loading...';
+        renderSpinner(detailsModalBody);
+        detailsModal.show();
+
+        switch (reportType) {
+            case 'doctor-revenue':
+                loadDoctorRevenueReport();
+                break;
+            case 'outstanding-balances':
+                loadOutstandingBalancesReport();
+                break;
+            case 'branch-summary':
+                loadBranchSummaryReport();
+                break;
+            case 'treatment-stats':
+                loadTreatmentStatsReport();
+                break;
+            case 'insurance-analysis':
+                loadInsuranceAnalysisReport();
+                break;
+        }
+    };
+
+
+    const loadDoctorRevenueReport = async () => {
+        detailsModalLabel.textContent = 'Doctor Revenue Report';
+        const data = await authorizedFetch('/api/branch-manager/reports/doctor-revenue');
+        
+        if (!data || data.length === 0) {
+            detailsModalBody.innerHTML = `<p class="text-center text-muted py-5">No doctor revenue data available.</p>`;
+            return;
         }
 
-        const balancesContainer = document.getElementById('balances-report');
-        if (balances && balances.length > 0) {
-            balancesContainer.innerHTML = `<table class="table"><thead><tr><th>Patient</th><th>Invoice ID</th><th>Amount Due</th></tr></thead><tbody>${balances.map(b => `<tr><td>${b.patient_name}</td><td>#${b.invoice_id}</td><td>Rs.${parseFloat(b.due_amount).toFixed(2)}</td></tr>`).join('')}</tbody></table>`;
-        } else {
-            balancesContainer.innerHTML = `<p class="text-muted text-center p-3">No outstanding balances.</p>`;
+        let content = `<div class="revenue-report-container">`;
+        data.forEach((doctor, index) => {
+            const docKey = `doctor-${index}`;
+            content += `
+                <div class="card mb-3 report-card">
+                    <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                        <div class="d-flex align-items-center gap-2">
+                            <h6 class="mb-0 fw-bold">${doctor.doctor_name}</h6>
+                            <i class="bi bi-chevron-down toggle-icon" id="toggle-${docKey}" style="transition: transform 0.3s;"></i>
+                        </div>
+                        <span class="badge bg-success">Rs.${parseFloat(doctor.total_revenue || 0).toFixed(2)}</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="row text-center small">
+                            <div class="col-sm-3">
+                                <small class="text-muted d-block">Appointments</small>
+                                <h6 class="fw-bold">${doctor.total_appointments || 0}</h6>
+                            </div>
+                            <div class="col-sm-3">
+                                <small class="text-muted d-block">Revenue</small>
+                                <h6 class="fw-bold">Rs.${parseFloat(doctor.total_revenue || 0).toFixed(2)}</h6>
+                            </div>
+                            <div class="col-sm-3">
+                                <small class="text-muted d-block">Out-of-Pocket</small>
+                                <h6 class="fw-bold">Rs.${parseFloat(doctor.out_of_pocket_revenue || 0).toFixed(2)}</h6>
+                            </div>
+                            <div class="col-sm-3">
+                                <small class="text-muted d-block">Insurance</small>
+                                <h6 class="fw-bold">Rs.${parseFloat(doctor.insurance_coverage || 0).toFixed(2)}</h6>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+        content += `</div>`;
+        detailsModalBody.innerHTML = content;
+    };
+
+    const loadOutstandingBalancesReport = async () => {
+        detailsModalLabel.textContent = 'Outstanding Balances';
+        const data = await authorizedFetch('/api/branch-manager/reports/outstanding-balances');
+        
+        if (!data || data.length === 0) {
+            detailsModalBody.innerHTML = `<p class="text-center text-muted py-5">No outstanding balances.</p>`;
+            return;
         }
 
-        const summaryContainer = document.getElementById('summary-report');
-        if (branchSummary && branchSummary.length > 0) {
-            summaryContainer.innerHTML = `<table class="table table-sm"><thead><tr><th>Date</th><th>Total</th><th>Completed</th><th>Cancelled</th></tr></thead><tbody>${branchSummary.slice(0, 10).map(s => `<tr><td>${new Date(s.appointment_date).toLocaleDateString()}</td><td>${s.total_appointments}</td><td>${s.completed}</td><td>${s.cancelled}</td></tr>`).join('')}</tbody></table>`;
-        } else {
-            summaryContainer.innerHTML = `<p class="text-muted text-center p-3">No appointment data available.</p>`;
+        let content = `<div class="table-responsive"><table class="table table-hover"><thead><tr><th>Patient</th><th>Invoice ID</th><th>Amount Due</th></tr></thead><tbody>`;
+        data.forEach(b => {
+            content += `<tr><td>${b.patient_name}</td><td>#${b.invoice_id}</td><td>Rs.${parseFloat(b.due_amount).toFixed(2)}</td></tr>`;
+        });
+        content += `</tbody></table></div>`;
+        detailsModalBody.innerHTML = content;
+    };
+
+    const loadBranchSummaryReport = async () => {
+        detailsModalLabel.textContent = 'Appointment Summary';
+        const data = await authorizedFetch('/api/branch-manager/reports/branch-summary');
+
+        if (!data || data.length === 0) {
+            detailsModalBody.innerHTML = `<p class="text-center text-muted py-5">No appointment data available.</p>`;
+            return;
         }
 
-        const treatmentContainer = document.getElementById('treatment-report');
-        if (treatmentStats && treatmentStats.length > 0) {
-            treatmentContainer.innerHTML = `<table class="table table-sm"><thead><tr><th>Treatment</th><th>Performed</th><th>Revenue</th></tr></thead><tbody>${treatmentStats.map(t => `<tr><td>${t.treatment_name}</td><td>${t.times_performed || 0}</td><td>Rs.${parseFloat(t.total_revenue || 0).toFixed(2)}</td></tr>`).join('')}</tbody></table>`;
-        } else {
-            treatmentContainer.innerHTML = `<p class="text-muted text-center p-3">No treatment data available.</p>`;
+        let content = `<div class="branch-summary-container">`;
+        data.slice(0, 20).forEach((summary, index) => {
+            const dateKey = `date-${index}`;
+            const dateStr = new Date(summary.appointment_date).toLocaleDateString();
+            content += `
+                <div class="card mb-3 branch-day-card" data-date="${dateStr}" style="cursor: pointer;">
+                    <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                        <div class="d-flex align-items-center gap-2">
+                            <h6 class="mb-0 fw-bold">${dateStr}</h6>
+                            <i class="bi bi-chevron-down toggle-icon" id="toggle-${dateKey}" style="transition: transform 0.3s;"></i>
+                        </div>
+                        <span class="badge bg-primary">${summary.total_appointments} Total</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="row text-center">
+                            <div class="col-sm-4">
+                                <div class="py-2">
+                                    <small class="text-muted d-block">Scheduled</small>
+                                    <h5 class="text-info fw-bold">${summary.scheduled}</h5>
+                                </div>
+                            </div>
+                            <div class="col-sm-4">
+                                <div class="py-2">
+                                    <small class="text-muted d-block">Completed</small>
+                                    <h5 class="text-success fw-bold">${summary.completed}</h5>
+                                </div>
+                            </div>
+                            <div class="col-sm-4">
+                                <div class="py-2">
+                                    <small class="text-muted d-block">Cancelled</small>
+                                    <h5 class="text-danger fw-bold">${summary.cancelled}</h5>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="appointment-details" id="details-${dateKey}" style="display: none;">
+                        <div class="card-body border-top" id="details-body-${dateKey}">
+                            <p class="text-center text-muted">Loading appointments...</p>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+        content += `</div>`;
+        detailsModalBody.innerHTML = content;
+
+        document.querySelectorAll('.branch-day-card').forEach((card, index) => {
+            card.addEventListener('click', async (e) => {
+                const dateKey = `date-${index}`;
+                const detailsDiv = document.getElementById(`details-${dateKey}`);
+                const detailsBody = document.getElementById(`details-body-${dateKey}`);
+                const toggleIcon = document.getElementById(`toggle-${dateKey}`);
+
+                if (detailsDiv.style.display === 'none') {
+                    const dateStr = card.dataset.date;
+                    detailsBody.innerHTML = '<p class="text-center text-muted">Loading appointments...</p>';
+                    detailsDiv.style.display = 'block';
+                    toggleIcon.style.transform = 'rotate(180deg)';
+
+                    const appointments = await authorizedFetch(`/api/branch-manager/appointments`);
+                    if (appointments) {
+                        const dateAppointments = appointments.filter(appt => {
+                            const apptDate = new Date(appt.schedule_date).toLocaleDateString();
+                            return apptDate === dateStr;
+                        });
+
+                        if (dateAppointments.length === 0) {
+                            detailsBody.innerHTML = '<p class="text-center text-muted py-3">No appointments for this date.</p>';
+                        } else {
+                            let appointmentHTML = `
+                                <div class="table-responsive">
+                                    <table class="table table-sm mb-0">
+                                        <thead>
+                                            <tr>
+                                                <th>Time</th>
+                                                <th>Patient</th>
+                                                <th>Doctor</th>
+                                                <th>Status</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                            `;
+                            dateAppointments.forEach(appt => {
+                                const time = new Date(appt.schedule_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                                const statusColor = appt.status === 'Completed' ? 'success' : appt.status === 'Cancelled' ? 'danger' : 'info';
+                                appointmentHTML += `
+                                    <tr>
+                                        <td><strong>${time}</strong></td>
+                                        <td>${appt.patient_name}</td>
+                                        <td>${appt.doctor_name}</td>
+                                        <td><span class="badge bg-${statusColor}">${appt.status}</span></td>
+                                    </tr>
+                                `;
+                            });
+                            appointmentHTML += `</tbody></table></div>`;
+                            detailsBody.innerHTML = appointmentHTML;
+                        }
+                    }
+                } else {
+                    detailsDiv.style.display = 'none';
+                    toggleIcon.style.transform = 'rotate(0deg)';
+                }
+            });
+        });
+    };
+
+    const loadTreatmentStatsReport = async () => {
+        detailsModalLabel.textContent = 'Treatment Statistics';
+        const data = await authorizedFetch('/api/branch-manager/reports/treatment-stats');
+
+        if (!data || data.length === 0) {
+            detailsModalBody.innerHTML = `<p class="text-center text-muted py-5">No treatment data available.</p>`;
+            return;
         }
 
-        const insuranceContainer = document.getElementById('insurance-report');
-        if (insuranceAnalysis && insuranceAnalysis.length > 0) {
-            insuranceContainer.innerHTML = `<table class="table table-sm"><thead><tr><th>Insurance Provider</th><th>Patients</th><th>Coverage</th><th>Out-of-Pocket</th><th>Avg %</th></tr></thead><tbody>${insuranceAnalysis.map(i => `<tr><td>${i.insurance_provider}</td><td>${i.total_patients}</td><td>Rs.${parseFloat(i.total_insurance_coverage || 0).toFixed(2)}</td><td>Rs.${parseFloat(i.total_out_of_pocket || 0).toFixed(2)}</td><td>${i.avg_coverage_percent || 0}%</td></tr>`).join('')}</tbody></table>`;
+        const groupedByTreatment = {};
+        data.forEach(item => {
+            const code = item.service_code;
+            if (!groupedByTreatment[code]) {
+                groupedByTreatment[code] = {
+                    name: item.treatment_name,
+                    total_performed: 0,
+                    total_revenue: 0
+                };
+            }
+            groupedByTreatment[code].total_performed += item.times_performed || 0;
+            groupedByTreatment[code].total_revenue += parseFloat(item.total_revenue || 0);
+        });
+
+        let content = `<div class="treatment-report-container">`;
+
+        if (Object.keys(groupedByTreatment).length === 0) {
+            content += `<p class="text-center text-muted py-5">No treatment data available.</p>`;
         } else {
-            insuranceContainer.innerHTML = `<p class="text-muted text-center p-3">No insurance data available.</p>`;
+            Object.entries(groupedByTreatment).forEach(([code, treatment]) => {
+                content += `
+                    <div class="card mb-3">
+                        <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                            <div>
+                                <h6 class="mb-0 fw-bold">${treatment.name}</h6>
+                                <small class="text-muted">Code: ${code}</small>
+                            </div>
+                            <div class="text-end">
+                                <h5 class="mb-0 text-success fw-bold">Rs.${treatment.total_revenue.toFixed(2)}</h5>
+                                <small class="text-muted">${treatment.total_performed} performed</small>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
         }
+
+        content += `</div>`;
+        detailsModalBody.innerHTML = content;
+    };
+
+    const loadInsuranceAnalysisReport = async () => {
+        detailsModalLabel.textContent = 'Insurance Coverage Analysis';
+        const data = await authorizedFetch('/api/branch-manager/reports/insurance-analysis');
+
+        if (!data || data.length === 0) {
+            detailsModalBody.innerHTML = `<p class="text-center text-muted py-5">No insurance data available.</p>`;
+            return;
+        }
+
+        let content = `<div class="insurance-report-container">`;
+
+        if (data.length === 0) {
+            content += `<p class="text-center text-muted py-5">No insurance data available.</p>`;
+        } else {
+            data.forEach((provider) => {
+                const totalBilled = parseFloat(provider.total_billed || 0);
+                const insuredAmount = parseFloat(provider.total_insurance_coverage || 0);
+                const outOfPocket = parseFloat(provider.total_out_of_pocket || 0);
+                const coveragePercent = provider.avg_coverage_percent || 0;
+
+                content += `
+                    <div class="card mb-3">
+                        <div class="card-header bg-light">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <h6 class="mb-0 fw-bold">${provider.insurance_provider}</h6>
+                                <span class="badge bg-info">${provider.total_patients || 0} Patients</span>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="row mb-3">
+                                <div class="col-sm-6">
+                                    <small class="text-muted d-block">Total Billed</small>
+                                    <h5 class="fw-bold">Rs.${totalBilled.toFixed(2)}</h5>
+                                </div>
+                                <div class="col-sm-6 text-end">
+                                    <small class="text-muted d-block">Coverage %</small>
+                                    <h5 class="fw-bold text-success">${coveragePercent}%</h5>
+                                </div>
+                            </div>
+                            <hr class="my-2">
+                            <div class="row small">
+                                <div class="col-sm-6">
+                                    <span class="text-muted">Insurance Coverage: </span><strong>Rs.${insuredAmount.toFixed(2)}</strong>
+                                </div>
+                                <div class="col-sm-6 text-end">
+                                    <span class="text-muted">Out-of-Pocket: </span><strong>Rs.${outOfPocket.toFixed(2)}</strong>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
+        content += `</div>`;
+        detailsModalBody.innerHTML = content;
     };
 
     // --- FORM HANDLERS ---
