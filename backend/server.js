@@ -120,7 +120,7 @@ app.get("/api/list/:type", authorize(['admin', 'receptionist', 'doctor', 'branch
             case "doctors": query = `
             SELECT d.doctor_id, s.name, GROUP_CONCAT(DISTINCT sp.name SEPARATOR ', ') as specialty
             FROM Doctor d
-            Staff s ON d.staff_id = s.staff_id
+            LEFT JOIN Staff s ON d.staff_id = s.staff_id
             LEFT JOIN doctor_specialties ds ON d.doctor_id = ds.doctor_id
             LEFT JOIN Specialties sp ON ds.specialty_id = sp.specialty_id
             GROUP BY d.doctor_id, s.name
