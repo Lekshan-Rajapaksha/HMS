@@ -1299,11 +1299,11 @@ app.post("/api/login/patient", async (req, res) => {
         // Loop through matches (e.g., "Anura D." and "Anura P.")
         for (const patient of rows) {
             const dob = new Date(patient.date_of_birth);
-            
+
             // Format month and day to be 2 digits (e.g., '03', '15')
             const month = String(dob.getMonth() + 1).padStart(2, '0');
             const day = String(dob.getDate()).padStart(2, '0');
-            
+
             // Build the derived password: MM + DD + ID
             const derivedPassword = `${month}${day}${patient.patient_id}`;
 
@@ -1352,8 +1352,8 @@ app.get("/api/patient/doctors", authorize(['patient']), async (req, res) => {
             ORDER BY b.name, s.name  -- <-- UPDATED ORDER
         `);
         res.json(rows);
-    } catch (err) { 
-        handleDatabaseError(res, err); 
+    } catch (err) {
+        handleDatabaseError(res, err);
     }
 });
 
@@ -1379,11 +1379,11 @@ app.get("/api/patient/my-appointments", authorize(['patient']), async (req, res)
             WHERE a.patient_id = ?
             ORDER BY a.schedule_date DESC
         `, [patientId]);
-        
+
         res.json(rows);
 
-    } catch (err) { 
-        handleDatabaseError(res, err); 
+    } catch (err) {
+        handleDatabaseError(res, err);
     }
 });
 
@@ -1391,7 +1391,7 @@ app.get("/api/patient/my-appointments", authorize(['patient']), async (req, res)
 app.get("/api/patient/my-documents", authorize(['patient']), async (req, res) => {
     try {
         // Get the patientId from the token's payload
-        const patientId = req.user.patientId; 
+        const patientId = req.user.patientId;
         if (!patientId) {
             return res.status(403).json({ message: 'Invalid patient token.' });
         }
@@ -1420,11 +1420,11 @@ app.get("/api/patient/my-documents", authorize(['patient']), async (req, res) =>
             )
             ORDER BY date DESC
         `, [patientId, patientId]);
-        
+
         res.json(rows);
 
-    } catch (err) { 
-        handleDatabaseError(res, err); 
+    } catch (err) {
+        handleDatabaseError(res, err);
     }
 });
 
@@ -1579,6 +1579,61 @@ app.delete("/api/doctor/availability/:availabilityId", authorize(['doctor']), ge
     } catch (err) { handleDatabaseError(res, err); }
 });
 
+// =========================================================================================
+// --- PROFILE & PASSWORD CHANGE ENDPOINT (All Authenticated Users) ---
+// =========================================================================================
+
+app.put("/api/profile/change-password", authorize(['admin', 'receptionist', 'branch manager', 'doctor']), async (req, res) => {
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+        return res.status(400).json({ message: "Current password and new password are required." });
+    }
+
+    if (newPassword.length < 6) {
+        return res.status(400).json({ message: "New password must be at least 6 characters long." });
+    }
+
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        // Get current password hash
+        const [[user]] = await connection.query(
+            "SELECT password_hash FROM Account_Info WHERE user_id = ?",
+            [req.user.userId]
+        );
+
+        if (!user) {
+            throw new Error("User not found.");
+        }
+
+        // Verify current password
+        const isMatch = await bcrypt.compare(currentPassword, user.password_hash);
+        if (!isMatch) {
+            await connection.rollback();
+            return res.status(401).json({ message: "Current password is incorrect." });
+        }
+
+        // Hash new password
+        const newPasswordHash = await bcrypt.hash(newPassword, 10);
+
+        // Update password
+        await connection.query(
+            "UPDATE Account_Info SET password_hash = ? WHERE user_id = ?",
+            [newPasswordHash, req.user.userId]
+        );
+
+        await connection.commit();
+        res.json({ message: "Password changed successfully." });
+
+    } catch (err) {
+        await connection.rollback();
+        handleDatabaseError(res, err);
+    } finally {
+        connection.release();
+    }
+});
 // KEEP THIS BLOCK AT THE END OF YOUR FILE
 app.listen(PORT, host, () => {
     console.log(`🚀 Server is running on ${host}:${PORT}`);

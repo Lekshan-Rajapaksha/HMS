@@ -129,12 +129,12 @@ document.addEventListener("DOMContentLoaded", () => {
                 <div class="col-lg-6 mb-4"><div class="card"><div class="card-header">Yearly Revenue Trend</div><div class="card-body"><div class="chart-container"><canvas id="yearly-revenue-chart"></canvas></div></div></div></div>
                 <div class="col-lg-6 mb-4"><div class="card"><div class="card-header">Patient Arrivals (Monthly)</div><div class="card-body"><div class="chart-container"><canvas id="patient-arrivals-chart"></canvas></div></div></div></div>
             </div>`;
-        
+
         const [yearlyRevenue, patientArrivals] = await Promise.all([
             authorizedFetch('/api/branch-manager/reports/yearly-revenue'),
             authorizedFetch('/api/branch-manager/reports/patient-arrivals')
         ]);
-        
+
         if (yearlyRevenue && yearlyRevenue.length > 0) {
             renderYearlyRevenueChart(yearlyRevenue);
         }
@@ -413,7 +413,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     </div>
                 </div>
             </div>`;
-        
+
         mainContent.addEventListener('click', (e) => {
             const reportCard = e.target.closest('.report-card');
             if (reportCard) {
@@ -451,7 +451,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const loadDoctorRevenueReport = async () => {
         detailsModalLabel.textContent = 'Doctor Revenue Report';
         const data = await authorizedFetch('/api/branch-manager/reports/doctor-revenue');
-        
+
         if (!data || data.length === 0) {
             detailsModalBody.innerHTML = `<p class="text-center text-muted py-5">No doctor revenue data available.</p>`;
             return;
@@ -499,7 +499,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const loadOutstandingBalancesReport = async () => {
         detailsModalLabel.textContent = 'Outstanding Balances';
         const data = await authorizedFetch('/api/branch-manager/reports/outstanding-balances');
-        
+
         if (!data || data.length === 0) {
             detailsModalBody.innerHTML = `<p class="text-center text-muted py-5">No outstanding balances.</p>`;
             return;
@@ -751,18 +751,18 @@ document.addEventListener("DOMContentLoaded", () => {
             const filteredRoles = roles.filter(r => !['admin', 'branch manager'].includes(r.name.toLowerCase()));
             formModalLabel.textContent = "Add New Staff to Your Branch";
             formModalBody.innerHTML = `<form id="modal-form"><input type="hidden" name="branch_id" value="${userProfile.branch_id}"><div class="row"><div class="col-md-6 mb-3"><label>Full Name</label><input type="text" name="name" class="form-control" required></div><div class="col-md-6 mb-3"><label>Contact</label><input type="text" name="contact_info" class="form-control" required></div><div class="col-md-6 mb-3"><label>Role</label><select class="form-select" name="role_id" required>${filteredRoles.map(r => `<option value="${r.role_id}">${r.name}</option>`).join('')}</select></div><div class="col-md-6 mb-3 d-none" id="specialty-container"><label>Specialties</label><div id="specialty-checkboxes" style="max-height: 150px; overflow-y: auto; border: 1px solid #dee2e6; padding: 8px; border-radius: 4px;"></div></div><div class="col-md-6 mb-3"><label>Username</label><input type="text" name="username" class="form-control" required></div><div class="col-md-6 mb-3"><label>Password</label><input type="password" name="password" class="form-control" required></div><div class="col-md-6 mb-3"><label>Email</label><input type="email" name="email" class="form-control" required></div></div><div class="form-check mb-3"><input type="checkbox" name="is_medical_staff" class="form-check-input" value="1"><label class="form-check-label">Is Medical Staff</label></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button><button type="submit" class="btn btn-primary">Create Staff</button></div></form>`;
-            
+
             const specialtyContainer = document.getElementById('specialty-checkboxes');
             if (specialties && specialties.length > 0) {
                 specialtyContainer.innerHTML = specialties.map(s => `<div class="form-check"><input type="checkbox" class="form-check-input specialty-checkbox" id="spec-${s.specialty_id}" value="${s.specialty_id}" data-specialty-name="${s.name}"><label class="form-check-label" for="spec-${s.specialty_id}">${s.name}</label></div>`).join('');
             }
-            
+
             const roleSelect = formModalBody.querySelector('[name="role_id"]');
             roleSelect.onchange = e => {
                 const isDoctor = e.target.selectedOptions[0].text.toLowerCase() === 'doctor';
                 document.getElementById('specialty-container').classList.toggle('d-none', !isDoctor);
             };
-            
+
             document.getElementById("modal-form").onsubmit = e => {
                 e.preventDefault();
                 const formData = new FormData(e.target);
@@ -790,7 +790,41 @@ document.addEventListener("DOMContentLoaded", () => {
 
     document.querySelector(".sidebar").addEventListener("click", e => { const navLink = e.target.closest(".nav-link"); if (navLink) { e.preventDefault(); navigateTo(navLink.dataset.page); } });
     document.getElementById('logout-button').addEventListener('click', () => { localStorage.removeItem('clinicProToken'); window.location.href = 'login.html'; });
+    // Profile & Password Change
+    const profileModal = new bootstrap.Modal(document.getElementById("profileModal"));
+    document.getElementById('profile-button').addEventListener('click', (e) => {
+        e.preventDefault();
+        document.getElementById('password-change-form').reset();
+        profileModal.show();
+    });
 
+    document.getElementById('password-change-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const formData = new FormData(e.target);
+        const data = Object.fromEntries(formData);
+
+        if (data.newPassword !== data.confirmPassword) {
+            showToast('Passwords do not match', 'danger');
+            return;
+        }
+
+        const result = await authorizedFetch('/api/profile/change-password', {
+            method: 'PUT',
+            body: JSON.stringify({
+                currentPassword: data.currentPassword,
+                newPassword: data.newPassword
+            })
+        });
+
+        if (result) {
+            profileModal.hide();
+            showToast('Password changed successfully. Please login again.', 'success');
+            setTimeout(() => {
+                localStorage.removeItem('clinicProToken');
+                window.location.href = 'login.html';
+            }, 2000);
+        }
+    });
     mainContent.addEventListener("click", (e) => {
         const target = e.target.closest("button[data-action]");
         if (!target) return;

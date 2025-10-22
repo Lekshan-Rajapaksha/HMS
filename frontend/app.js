@@ -355,7 +355,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     },
                     tooltip: {
                         callbacks: {
-                            label: function(context) {
+                            label: function (context) {
                                 return context.label + ': ' + context.parsed + '%';
                             }
                         }
@@ -1053,6 +1053,42 @@ document.addEventListener("DOMContentLoaded", () => {
     const navigateTo = (page) => { navLinks.forEach(link => link.classList.toggle("active", link.dataset.page === page)); (pageLoaders[page] || pageLoaders.dashboard)(); };
     document.querySelector(".sidebar").addEventListener("click", e => { const navLink = e.target.closest(".nav-link"); if (navLink) { e.preventDefault(); navigateTo(navLink.dataset.page); } });
     document.getElementById('logout-button').addEventListener('click', () => { localStorage.removeItem('clinicProToken'); window.location.href = 'login.html'; });
+
+    // Profile & Password Change
+    const profileModal = new bootstrap.Modal(document.getElementById("profileModal"));
+    document.getElementById('profile-button').addEventListener('click', (e) => {
+        e.preventDefault();
+        document.getElementById('password-change-form').reset();
+        profileModal.show();
+    });
+
+    document.getElementById('password-change-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const formData = new FormData(e.target);
+        const data = Object.fromEntries(formData);
+
+        if (data.newPassword !== data.confirmPassword) {
+            showToast('Passwords do not match', 'danger');
+            return;
+        }
+
+        const result = await authorizedFetch('/api/profile/change-password', {
+            method: 'PUT',
+            body: JSON.stringify({
+                currentPassword: data.currentPassword,
+                newPassword: data.newPassword
+            })
+        });
+
+        if (result) {
+            profileModal.hide();
+            showToast('Password changed successfully. Please login again.', 'success');
+            setTimeout(() => {
+                localStorage.removeItem('clinicProToken');
+                window.location.href = 'login.html';
+            }, 2000);
+        }
+    });
 
     mainContent.addEventListener("click", (e) => {
         const actionTarget = e.target.closest("[data-action]");
