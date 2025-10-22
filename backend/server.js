@@ -1108,7 +1108,7 @@ app.post("/api/patient/book-appointment", authorize(['patient']), async (req, re
     const { doctorId, branchId, scheduleDateTime } = req.body;
 
     if (!doctorId || !branchId || !scheduleDateTime) {
-        return res.status(400.json({ message: "Doctor, branch, and schedule date are required." });
+        return res.status(400).json({ message: "Doctor, branch, and schedule date are required." });
     }
 
     try {
