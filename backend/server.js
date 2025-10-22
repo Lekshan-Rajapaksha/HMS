@@ -1105,19 +1105,19 @@ app.get("/api/patient/my-documents", authorize(['patient']), async (req, res) =>
 // --- NEW: Book an Appointment (for Patients) ---
 app.post("/api/patient/book-appointment", authorize(['patient']), async (req, res) => {
     const { patientId } = req.user;
-    const { doctorId, branchId, scheduleDateTime } = req.body;
+    const { doctorId, branchId, scheduleDateTime } = req.body; // scheduleDateTime is the START time
 
     if (!doctorId || !branchId || !scheduleDateTime) {
         return res.status(400).json({ message: "Doctor, branch, and schedule date are required." });
     }
 
     try {
-        // --- START UPDATED VALIDATION CHECK (Check 1: Same Doctor, Same Day) ---
+        // --- START Check 1: Same Doctor, Same Day ---
         const [[{ sameDayDoctorCount }]] = await pool.query(
             `SELECT COUNT(*) as count FROM Appointment
              WHERE patient_id = ?
-             AND doctor_id = ?        -- <-- ADDED CHECK FOR DOCTOR
-             AND DATE(schedule_date) = DATE(?) -- <-- CHECK FOR SAME DAY
+             AND doctor_id = ?
+             AND DATE(schedule_date) = DATE(?)
              AND status IN ('Scheduled', 'Rescheduled')`,
             [patientId, doctorId, scheduleDateTime]
         );
@@ -1127,18 +1127,24 @@ app.post("/api/patient/book-appointment", authorize(['patient']), async (req, re
         }
         // --- END CHECK 1 ---
 
-        // --- START Check 2: Same Time Slot (Any Doctor) ---
-        // (Keep the previous check for exact time clashes)
-        const [[{ sameTimeCount }]] = await pool.query(
-            `SELECT COUNT(*) as count FROM Appointment
+        // --- START Check 2: Overlapping Time Slot (Any Doctor) ---
+        // Assume 30-minute slots. Calculate the end time of the requested slot.
+        const requestedStartTime = new Date(scheduleDateTime);
+        const requestedEndTime = new Date(requestedStartTime.getTime() + 30 * 60000); // Add 30 minutes
+
+        // Query for existing appointments that overlap with the requested time range
+        const [overlappingAppointments] = await pool.query(
+            `SELECT schedule_date FROM Appointment
              WHERE patient_id = ?
-             AND schedule_date = ?
-             AND status IN ('Scheduled', 'Rescheduled')`,
-            [patientId, scheduleDateTime]
+             AND status IN ('Scheduled', 'Rescheduled')
+             AND ? < DATE_ADD(schedule_date, INTERVAL 30 MINUTE) -- New start < Existing end
+             AND ? > schedule_date`,                         // New end > Existing start
+            [patientId, requestedStartTime, requestedEndTime] // Use JS Date objects directly if driver supports it, else format to SQL DATETIME string
         );
 
-        if (sameTimeCount > 0) {
-            return res.status(409).json({ message: "You already have another appointment at this exact time." });
+        if (overlappingAppointments.length > 0) {
+            // Found an overlap
+            return res.status(409).json({ message: "This time slot overlaps with another appointment you have booked." });
         }
         // --- END CHECK 2 ---
 
