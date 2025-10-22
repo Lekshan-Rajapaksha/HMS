@@ -143,7 +143,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     const loadAvailability = async () => {
         const availability = await authorizedFetch('/api/doctor/availability');
-        
+
         currentAvailability = {};
         for (let dayOfWeek = 0; dayOfWeek < 7; dayOfWeek++) {
             currentAvailability[dayOfWeek] = {
@@ -156,14 +156,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
         if (availability && Array.isArray(availability)) {
             availability.forEach(slot => {
-                if (!currentAvailability[slot.day_of_week]) {
-                    currentAvailability[slot.day_of_week] = {
-                        dayOfWeek: slot.day_of_week,
-                        startTime: slot.start_time,
-                        endTime: slot.end_time,
-                        isAvailable: slot.is_available
-                    };
-                }
+                const startTime = slot.start_time.substring(0, 5);
+                const endTime = slot.end_time.substring(0, 5);
+                currentAvailability[slot.day_of_week] = {
+                    dayOfWeek: slot.day_of_week,
+                    startTime: startTime,
+                    endTime: endTime,
+                    isAvailable: slot.is_available
+                };
             });
         }
 

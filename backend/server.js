@@ -1530,18 +1530,25 @@ app.post("/api/doctor/availability", authorize(['doctor']), getDoctorInfoFromTok
         await connection.beginTransaction();
         const { availabilitySlots } = req.body;
 
-        if (!Array.isArray(availabilitySlots) || availabilitySlots.length === 0) {
+        if (!Array.isArray(availabilitySlots)) {
             await connection.rollback();
-            return res.status(400).json({ message: "availability slots required" });
+            return res.status(400).json({ message: "availabilitySlots must be an array" });
         }
 
         await connection.query("DELETE FROM doctor_availability WHERE doctor_id = ?", [req.doctorId]);
 
         for (const slot of availabilitySlots) {
+            if (!slot.dayOfWeek && slot.dayOfWeek !== 0) {
+                throw new Error("Each slot must have a dayOfWeek");
+            }
+            if (!slot.startTime || !slot.endTime) {
+                throw new Error("Each slot must have startTime and endTime");
+            }
+
             const { dayOfWeek, startTime, endTime, isAvailable } = slot;
             await connection.query(
                 "INSERT INTO doctor_availability (doctor_id, day_of_week, start_time, end_time, is_available) VALUES (?, ?, ?, ?, ?)",
-                [req.doctorId, dayOfWeek, startTime, endTime, isAvailable]
+                [req.doctorId, dayOfWeek, startTime, endTime, isAvailable ? 1 : 0]
             );
         }
 
