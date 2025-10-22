@@ -1112,23 +1112,23 @@ app.post("/api/patient/book-appointment", authorize(['patient']), async (req, re
     }
 
     try {
-        // --- START NEW VALIDATION CHECK ---
+        // --- START UPDATED VALIDATION CHECK ---
+        // We now check for an exact timestamp match, not just the day
         const [[{ count }]] = await pool.query(
             `SELECT COUNT(*) as count FROM Appointment 
              WHERE patient_id = ? 
-             AND DATE(schedule_date) = DATE(?) 
+             AND schedule_date = ?  -- <-- THIS IS THE CHANGE
              AND status IN ('Scheduled', 'Rescheduled')`,
             [patientId, scheduleDateTime]
         );
 
         if (count > 0) {
-            // If count is > 0, block the booking
-            return res.status(409).json({ message: "You already have an appointment booked for this day." });
+            // If count > 0, they already have a booking at this exact time
+            return res.status(409).json({ message: "You already have an appointment at this exact time." });
         }
-        // --- END NEW VALIDATION CHECK ---
+        // --- END UPDATED VALIDATION CHECK ---
 
-
-        // If check passes, proceed with the original insert
+        // Proceed with the insert
         await pool.query(
             "INSERT INTO Appointment (patient_id, doctor_id, branch_id, schedule_date, status) VALUES (?, ?, ?, ?, 'Scheduled')",
             [patientId, doctorId, branchId, scheduleDateTime]
@@ -1137,6 +1137,7 @@ app.post("/api/patient/book-appointment", authorize(['patient']), async (req, re
         res.status(201).json({ message: "Appointment booked successfully." });
 
     } catch (err) {
+        // This handles the DOCTOR'S availability trigger
         if (err.sqlState === '45000') {
             return res.status(409).json({ message: "This time slot is no longer available. Please select another time." });
         }
