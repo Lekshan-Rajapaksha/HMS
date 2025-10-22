@@ -328,8 +328,6 @@ document.addEventListener("DOMContentLoaded", () => {
     // [New openStaffForm function]
     // Replace the existing openStaffForm function with this one
 
-// Replace the existing openStaffForm function in BOTH app.js and branch.js
-
 const openStaffForm = async (id = null) => {
     const isEditing = id !== null;
 
@@ -348,9 +346,7 @@ const openStaffForm = async (id = null) => {
         return;
     }
     // For Branch Manager: Filter out Admin/Manager roles when *adding* new staff
-    // Assumes 'userProfile' is globally available in branch.js
-    const isBranchManagerAdding = typeof userProfile !== 'undefined' && userProfile.branch_id && !isEditing;
-    const availableRoles = isBranchManagerAdding
+    const availableRoles = (typeof userProfile !== 'undefined' && userProfile.branch_id && !isEditing)
         ? roles.filter(r => !['admin', 'branch manager'].includes(r.name.toLowerCase()))
         : roles;
 
@@ -361,21 +357,21 @@ const openStaffForm = async (id = null) => {
     let specialtyCheckboxesHTML = '';
     if (specialties && specialties.length > 0) {
         specialtyCheckboxesHTML = specialties.map(spec => `
-            <div class="form-check form-check-inline col-md-3 mb-2"> {/* Adjust layout */}
+            <div class="form-check form-check-inline">
                 <input class="form-check-input specialty-checkbox" type="checkbox" name="specialty_ids[]" value="${spec.specialty_id}" id="spec-${spec.specialty_id}"
                        ${isEditing && staffData.specialty_ids && staffData.specialty_ids.includes(spec.specialty_id) ? 'checked' : ''}>
                 <label class="form-check-label" for="spec-${spec.specialty_id}">${spec.name}</label>
             </div>
         `).join('');
     } else {
-        specialtyCheckboxesHTML = '<p class="text-muted">No specialties available to assign.</p>';
+        specialtyCheckboxesHTML = '<p class="text-muted">No specialties available.</p>';
     }
     // ------------------------------------
 
     formModalBody.innerHTML = `<form id="modal-form">
         ${
             // Include hidden branch_id only for Branch Manager adding staff
-            isBranchManagerAdding
+            (typeof userProfile !== 'undefined' && userProfile.branch_id && !isEditing)
             ? `<input type="hidden" name="branch_id" value="${userProfile.branch_id}">`
             : ''
         }
@@ -384,8 +380,8 @@ const openStaffForm = async (id = null) => {
             <div class="col-md-6 mb-3"><label>Full Name</label><input type="text" name="name" class="form-control" value="${staffData.name || ''}" required></div>
             <div class="col-md-6 mb-3"><label>Contact Info</label><input type="text" name="contact_info" class="form-control" value="${staffData.contact_info || ''}" required></div>
             ${
-                // Show Branch dropdown only for Admin (or if Branch Manager context isn't defined)
-                !isBranchManagerAdding
+                // Show Branch dropdown only for Admin
+                (typeof userProfile === 'undefined' || !userProfile.branch_id)
                 ? `<div class="col-md-6 mb-3"><label>Branch</label><select name="branch_id" class="form-select" required>${createOptions(branches, "branch_id", "name", staffData.branch_id)}</select></div>`
                 : '' // Branch Manager's branch is set via hidden input or backend logic
             }
@@ -402,9 +398,7 @@ const openStaffForm = async (id = null) => {
         <hr>
         <div id="specialty-container" class="mb-3 d-none">
              <h5>Specialties (for Doctors)</h5>
-             <div class="row"> {/* Use row for better checkbox layout */}
-                ${specialtyCheckboxesHTML}
-             </div>
+             ${specialtyCheckboxesHTML}
         </div>
 
         <div class="modal-footer mt-4"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button><button type="submit" class="btn btn-primary">Save</button></div>
@@ -429,34 +423,30 @@ const openStaffForm = async (id = null) => {
     form.onsubmit = e => {
         e.preventDefault();
         const formData = new FormData(form);
-        const data = Object.fromEntries(formData.entries()); // Basic key-value pairs
+        const data = Object.fromEntries(formData.entries());
 
         // --- Manually collect checked specialty IDs ---
         const selectedSpecialtyIds = [];
         const specialtyCheckboxes = form.querySelectorAll('.specialty-checkbox:checked');
         specialtyCheckboxes.forEach(checkbox => {
-            selectedSpecialtyIds.push(checkbox.value); // Collect values
+            selectedSpecialtyIds.push(checkbox.value);
         });
         // Add the array to the data payload (use the key your backend expects, e.g., "specialty_ids")
         data.specialty_ids = selectedSpecialtyIds;
-        // Clean up the placeholder key if FormData created it
-        delete data['specialty_ids[]'];
         // -------------------------------------------
 
-
-        // If the role is not 'Doctor', remove the specialty_ids
+        // If the role is not 'Doctor', remove the specialty_ids to avoid sending empty/irrelevant data
         const selectedRoleText = roleSelect.options[roleSelect.selectedIndex]?.text.toLowerCase();
         if (selectedRoleText !== 'doctor') {
             delete data.specialty_ids;
+            // Also remove the placeholder 'specialty_ids[]' key if FormData created it
+            delete data['specialty_ids[]'];
         } else {
-             // If it IS a doctor but NO specialties selected, send empty array if backend needs it
-             // Or delete if backend handles absence correctly
+             // If it is a doctor but no specialties selected, ensure an empty array is sent (if backend requires it)
              if (!data.specialty_ids || data.specialty_ids.length === 0) {
-                 // Option 1: Send empty array
-                  data.specialty_ids = [];
-                 // Option 2: Delete the key (choose based on backend)
-                 // delete data.specialty_ids;
+                data.specialty_ids = [];
              }
+             delete data['specialty_ids[]']; // Clean up potential FormData artifact
         }
 
 
@@ -465,18 +455,15 @@ const openStaffForm = async (id = null) => {
             delete data.password;
         }
 
-        // Handle checkbox 'is_medical_staff'
+        // Handle checkbox 'is_medical_staff' (FormData sends '1' if checked, nothing if not)
         data.is_medical_staff = formData.has('is_medical_staff') ? '1' : '0';
-
-        // Determine correct refresh function based on context (Admin vs Branch Manager)
-        const refreshFunction = (typeof userProfile !== 'undefined' && userProfile.branch_id) ? loadStaffPage : loadStaffPage; // Assuming loadStaffPage works for both, adjust if needed
 
 
         submitForm(
             isEditing ? `/api/staff/${id}` : "/api/staff",
             isEditing ? "PUT" : "POST",
             data,
-            refreshFunction // Use determined refresh function
+            loadStaffPage // Or the appropriate refresh function for the current view
         );
     };
 };
