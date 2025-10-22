@@ -597,7 +597,7 @@ app.get("/api/appointments/doctor/:id", authorize(['receptionist']), async (req,
     } catch (err) { handleDatabaseError(res, err); }
 });
 
-app.get("/api/doctors/:id/availability", authorize(['receptionist']), async (req, res) => {
+app.get("/api/doctors/:id/availability", authorize(['receptionist', 'patient']), async (req, res) => {
     try {
         const { id } = req.params;
         const { date } = req.query;
