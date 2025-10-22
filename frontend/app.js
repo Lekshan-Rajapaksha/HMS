@@ -1052,7 +1052,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const pageLoaders = { dashboard: loadDashboard, reports: loadReportsPage, patients: loadPatientsPage, staff: loadStaffPage, branches: loadBranchesPage, "insurance-providers": loadInsuranceProvidersPage, treatments: loadTreatmentsPage, specialties: loadSpecialtiesPage };
     const navigateTo = (page) => { navLinks.forEach(link => link.classList.toggle("active", link.dataset.page === page)); (pageLoaders[page] || pageLoaders.dashboard)(); };
     document.querySelector(".sidebar").addEventListener("click", e => { const navLink = e.target.closest(".nav-link"); if (navLink) { e.preventDefault(); navigateTo(navLink.dataset.page); } });
-    document.getElementById('logout-button').addEventListener('click', () => { localStorage.removeItem('clinicProToken'); window.location.href = 'login.html'; });
+    document.getElementById('logout-button').addEventListener('click', () => { localStorage.removeItem('clinicProToken'); window.location.href = 'index.html'; });
 
     // Profile & Password Change
     const profileModal = new bootstrap.Modal(document.getElementById("profileModal"));
@@ -1085,7 +1085,7 @@ document.addEventListener("DOMContentLoaded", () => {
             showToast('Password changed successfully. Please login again.', 'success');
             setTimeout(() => {
                 localStorage.removeItem('clinicProToken');
-                window.location.href = 'login.html';
+                window.location.href = 'index.html';
             }, 2000);
         }
     });

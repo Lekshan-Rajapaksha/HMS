@@ -1,7 +1,7 @@
 // reception.js
 const API_BASE_URL = "https://hms-production-a5ad.up.railway.app";
 const authToken = localStorage.getItem('clinicProToken');
-if (!authToken) window.location.href = '/login.html';
+if (!authToken) window.location.href = '/index.html';
 
 document.addEventListener("DOMContentLoaded", () => {
     const mainContent = document.getElementById("main-content");
@@ -32,7 +32,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const mergedOptions = { ...defaultOptions, ...options, headers: { ...defaultOptions.headers, ...options.headers } };
         try {
             const response = await fetch(`${API_BASE_URL}${endpoint}`, mergedOptions);
-            if ([401, 403].includes(response.status)) { localStorage.removeItem('clinicProToken'); window.location.href = '/login.html'; return null; }
+            if ([401, 403].includes(response.status)) { localStorage.removeItem('clinicProToken'); window.location.href = '/index.html'; return null; }
             if (!response.ok) { const err = await response.json(); throw new Error(err.message || `HTTP error! status: ${response.status}`); }
             return response.status === 204 ? null : response.json();
         } catch (error) { console.error("Fetch error:", error); showToast(`Error: ${error.message}`, 'danger'); return null; }
@@ -199,8 +199,42 @@ document.addEventListener("DOMContentLoaded", () => {
     const pageLoaders = { patients: loadPatientsPage, appointments: loadAppointmentsPage, schedules: loadSchedulesPage, invoices: loadInvoicesPage };
     const navigateTo = page => { navLinks.forEach(l => l.classList.toggle("active", l.dataset.page === page)); (pageLoaders[page] || pageLoaders.appointments)(); };
     document.querySelector(".sidebar").onclick = e => { const navLink = e.target.closest(".nav-link"); if (navLink) { e.preventDefault(); navigateTo(navLink.dataset.page); } };
-    document.getElementById('logout-button').onclick = e => { e.preventDefault(); localStorage.removeItem('clinicProToken'); window.location.href = 'login.html'; };
+    document.getElementById('logout-button').onclick = e => { e.preventDefault(); localStorage.removeItem('clinicProToken'); window.location.href = 'index.html'; };
+    // Profile & Password Change
+    const profileModal = new bootstrap.Modal(document.getElementById("profileModal"));
+    document.getElementById('profile-button').addEventListener('click', (e) => {
+        e.preventDefault();
+        document.getElementById('password-change-form').reset();
+        profileModal.show();
+    });
 
+    document.getElementById('password-change-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const formData = new FormData(e.target);
+        const data = Object.fromEntries(formData);
+
+        if (data.newPassword !== data.confirmPassword) {
+            showToast('Passwords do not match', 'danger');
+            return;
+        }
+
+        const result = await authorizedFetch('/api/profile/change-password', {
+            method: 'PUT',
+            body: JSON.stringify({
+                currentPassword: data.currentPassword,
+                newPassword: data.newPassword
+            })
+        });
+
+        if (result) {
+            profileModal.hide();
+            showToast('Password changed successfully. Please login again.', 'success');
+            setTimeout(() => {
+                localStorage.removeItem('clinicProToken');
+                window.location.href = 'index.html';
+            }, 2000);
+        }
+    });
     mainContent.onclick = e => {
         const target = e.target.closest("button[data-action]");
         if (!target) return;

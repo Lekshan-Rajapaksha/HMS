@@ -6,7 +6,7 @@ const authToken = localStorage.getItem('clinicProToken');
 
 // Global authentication check
 if (!authToken) {
-    window.location.href = '/login.html';
+    window.location.href = '/index.html';
 }
 
 // --- GLOBAL STATE ---
@@ -45,7 +45,7 @@ const authorizedFetch = async (endpoint, options = {}) => {
 
         if ([401, 403].includes(response.status)) {
             localStorage.removeItem('clinicProToken');
-            window.location.href = '/login.html';
+            window.location.href = '/index.html';
             return null;
         }
 
@@ -127,7 +127,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
             if ([401, 403].includes(response.status)) {
                 localStorage.removeItem('clinicProToken');
-                window.location.href = '/login.html';
+                window.location.href = '/index.html';
                 return null;
             }
 
@@ -865,9 +865,43 @@ document.addEventListener("DOMContentLoaded", () => {
     // Logout
     document.getElementById('logout-button').onclick = () => {
         localStorage.removeItem('clinicProToken');
-        window.location.href = 'login.html';
+        window.location.href = 'index.html';
     };
+    // Profile & Password Change
+    const profileModal = new bootstrap.Modal(document.getElementById("profileModal"));
+    document.getElementById('profile-button').addEventListener('click', (e) => {
+        e.preventDefault();
+        document.getElementById('password-change-form').reset();
+        profileModal.show();
+    });
 
+    document.getElementById('password-change-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const formData = new FormData(e.target);
+        const data = Object.fromEntries(formData);
+
+        if (data.newPassword !== data.confirmPassword) {
+            showToast('Passwords do not match', 'danger');
+            return;
+        }
+
+        const result = await localAuthorizedFetch('/api/profile/change-password', {
+            method: 'PUT',
+            body: JSON.stringify({
+                currentPassword: data.currentPassword,
+                newPassword: data.newPassword
+            })
+        });
+
+        if (result) {
+            profileModal.hide();
+            showToast('Password changed successfully. Please login again.', 'success');
+            setTimeout(() => {
+                localStorage.removeItem('clinicProToken');
+                window.location.href = 'index.html';
+            }, 2000);
+        }
+    });
     // --- INITIALIZATION (Combined and executed only once) ---
     loadInitialData(); // Loads profile, stats, treatments, and appointments ('today')
     loadAvailability(); // Initializes the availability grid and data
