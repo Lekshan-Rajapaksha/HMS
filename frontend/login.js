@@ -33,7 +33,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
             switch (role) {
                 case 'admin':
-                    window.location.href = 'index.html';
+                    window.location.href = 'admin.html';
                     break;
                 case 'receptionist':
                     window.location.href = 'reception.html';

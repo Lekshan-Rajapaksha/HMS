@@ -5,7 +5,7 @@ const API_BASE_URL = "https://hms-production-a5ad.up.railway.app";
 document.addEventListener("DOMContentLoaded", () => {
     const token = localStorage.getItem('clinicProToken');
     if (!token) {
-        window.location.href = 'login.html';
+        window.location.href = 'admin.html';
         return;
     }
 
@@ -46,7 +46,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const response = await fetch(`${API_BASE_URL}${endpoint}`, mergedOptions);
             if ([401, 403].includes(response.status)) {
                 localStorage.removeItem('clinicProToken');
-                window.location.href = 'login.html';
+                window.location.href = 'index.html';
                 return null;
             }
             if (!response.ok) {
