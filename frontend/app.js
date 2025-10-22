@@ -194,8 +194,8 @@ document.addEventListener("DOMContentLoaded", () => {
             `;
                 // 4. Add staff members as rows
                 staffInRole.forEach(s => {
-                    const specialtyDisplay = s.role_name.toLowerCase() === 'doctor' && s.doctor_specialties?.length > 0
-                        ? `<br><small class="text-muted">${s.doctor_specialties.map(sp => `<span class="badge bg-info">${sp}</span>`).join(' ')}</small>`
+                    const specialtyDisplay = s.role_name.toLowerCase() === 'doctor' && s.doctor_specialties
+                        ? `<br><small class="text-muted">${s.doctor_specialties.split(', ').map(sp => `<span class="badge bg-info">${sp}</span>`).join(' ')}</small>`
                         : '';
                     accordionHTML += `
                     <tr>
@@ -985,7 +985,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 <div class="col-md-6 mb-3"><label>Username</label><input type="text" name="username" class="form-control" value="${staffData.username || ''}" required></div>
                 <div class="col-md-6 mb-3"><label>Email</label><input type="email" name="email" class="form-control" value="${staffData.email || ''}" required></div>
                 <div class="col-md-6 mb-3"><label>Role</label><select name="role_id" class="form-select" required>${createOptions(roles, "role_id", "name", staffData.role_id)}</select></div>
-                <div class="col-md-6 mb-3 d-none" id="specialty-container"><label>Specialties</label><div id="specialty-checkboxes" class="border rounded p-2" style="max-height: 200px; overflow-y: auto;">${specialties?.map(s => `<div class="form-check"><input type="checkbox" class="form-check-input specialty-checkbox" name="specialties" value="${s.specialty_id}" id="spec-${s.specialty_id}" ${staffData.doctor_specialties?.includes(s.specialty_id) ? 'checked' : ''}><label class="form-check-label" for="spec-${s.specialty_id}">${s.name}</label></div>`).join('')}</div></div>
+               <div class="col-md-6 mb-3 d-none" id="specialty-container"><label>Specialties</label><div id="specialty-checkboxes" class="border rounded p-2" style="max-height: 200px; overflow-y: auto;">${specialties?.map(s => `<div class="form-check"><input type="checkbox" class="form-check-input specialty-checkbox" name="specialties" value="${s.specialty_id}" id="spec-${s.specialty_id}" ${staffData.specialty_ids?.includes(s.specialty_id) ? 'checked' : ''}><label class="form-check-label" for="spec-${s.specialty_id}">${s.name}</label></div>`).join('')}</div></div>
                 <div class="col-md-6 mb-3"><label>Password</label><input type="password" name="password" class="form-control" placeholder="${isEditing ? 'Leave blank to keep unchanged' : ''}" ${!isEditing ? 'required' : ''}></div>
             </div>
             <div class="modal-footer mt-4"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button><button type="submit" class="btn btn-primary">Save</button></div>
@@ -1012,10 +1012,12 @@ document.addEventListener("DOMContentLoaded", () => {
             const data = Object.fromEntries(formData);
 
             // Handle multiple specialties for doctors
+            // Handle multiple specialties for doctors
             const specialtyCheckboxes = document.querySelectorAll('.specialty-checkbox:checked');
             if (specialtyCheckboxes.length > 0) {
-                data.specialties = Array.from(specialtyCheckboxes).map(cb => cb.value);
+                data.specialty_ids = Array.from(specialtyCheckboxes).map(cb => cb.value);
             }
+            delete data.specialties; // Remove the old 'specialties' field
 
             // On edit, if password field is empty, don't send it
             if (isEditing && !data.password) {

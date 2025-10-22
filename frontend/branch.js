@@ -287,17 +287,24 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     const renderStaffTable = (data) => {
-        renderTable(data, ["ID", "Name", "Role", "Contact"],
-            s => `<tr><td>${s.staff_id}</td><td>${s.name} ${s.is_medical_staff ? '<i class="bi bi-heart-pulse text-primary" title="Medical Staff"></i>' : ""}</td><td>${s.role_name}</td><td>${s.contact_info}</td><td class="table-actions"><button class="btn btn-sm btn-outline-secondary" data-action="edit" data-type="staff" data-id="${s.staff_id}"><i class="bi bi-pencil-fill"></i></button></td></tr>`,
+        renderTable(data, ["ID", "Name", "Role", "Specialty", "Contact"],
+            s => `<tr>
+                <td>${s.staff_id}</td>
+                <td>${s.name} ${s.is_medical_staff ? '<i class="bi bi-heart-pulse text-primary" title="Medical Staff"></i>' : ""}</td>
+                <td>${s.role_name}</td>
+                <td><small>${s.specialty_name || 'N/A'}</small></td>
+                <td>${s.contact_info}</td>
+                <td class="table-actions"><button class="btn btn-sm btn-outline-secondary" data-action="edit" data-type="staff" data-id="${s.staff_id}"><i class="bi bi-pencil-fill"></i></button></td>
+             </tr>`,
             "No staff found for this branch."
         );
     };
 
     const loadStaffPage = async () => {
-        createPageTemplate({ title: "Branch Staff", type: "staff", headers: ["ID", "Name", "Role", "Contact"] });
+        createPageTemplate({ title: "Branch Staff", type: "staff", headers: ["ID", "Name", "Role", "Specialty", "Contact"] });
         currentViewData = await authorizedFetch("/api/branch-manager/staff");
         renderStaffTable(currentViewData)
-        setupSearch(renderStaffTable, ['staff_id', 'name', 'role_name']);
+        setupSearch(renderStaffTable, ['staff_id', 'name', 'role_name', 'specialty_name']);
     };
 
     const renderInvoicesTable = (data) => {

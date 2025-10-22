@@ -117,8 +117,15 @@ app.get("/api/list/:type", authorize(['admin', 'receptionist', 'doctor', 'branch
     try {
         switch (type) {
             case "patients": query = "SELECT patient_id, name FROM Patient ORDER BY name"; break;
-            case "doctors": query = "SELECT d.doctor_id, s.name, sp.name as specialty FROM Doctor d JOIN Staff s ON d.staff_id = s.staff_id LEFT JOIN doctor_specialties ds ON d.doctor_id = ds.doctor_id LEFT JOIN Specialties sp ON ds.specialty_id = sp.specialty_id ORDER BY s.name"; break;
-            case "branches": query = "SELECT branch_id, name FROM Branch ORDER BY name"; break;
+            case "doctors": query = `
+            SELECT d.doctor_id, s.name, GROUP_CONCAT(DISTINCT sp.name SEPARATOR ', ') as specialty
+            FROM Doctor d
+            Staff s ON d.staff_id = s.staff_id
+            LEFT JOIN doctor_specialties ds ON d.doctor_id = ds.doctor_id
+            LEFT JOIN Specialties sp ON ds.specialty_id = sp.specialty_id
+            GROUP BY d.doctor_id, s.name
+            ORDER BY s.name
+`; break; case "branches": query = "SELECT branch_id, name FROM Branch ORDER BY name"; break;
             case "roles": query = "SELECT role_id, name FROM Role ORDER BY name"; break;
             case "insurance-providers": query = "SELECT id, name FROM Insurance_Provider ORDER BY name"; break;
             case "specialties": query = "SELECT specialty_id, name FROM Specialties ORDER BY name"; break;
@@ -333,17 +340,25 @@ app.put("/api/branches/:id", authorize(['admin']), async (req, res) => {
 app.get("/api/staff", authorize(['admin']), async (req, res) => {
     try {
         const [rows] = await pool.query(`
-            SELECT s.*, r.name as role_name, COALESCE(b.name, 'Unassigned') as branch_name 
+            SELECT 
+                s.staff_id, s.user_id, s.name, s.contact_info, s.is_medical_staff, s.branch_id, 
+                r.name as role_name, 
+                COALESCE(b.name, 'Unassigned') as branch_name, 
+                ai.username, ai.email,
+                GROUP_CONCAT(DISTINCT sp.name SEPARATOR ', ') as doctor_specialties
             FROM Staff s 
             LEFT JOIN Account_Info ai ON s.user_id = ai.user_id 
             LEFT JOIN Role r ON ai.role_id = r.role_id 
             LEFT JOIN Branch b ON s.branch_id = b.branch_id 
+            LEFT JOIN Doctor d ON s.staff_id = d.staff_id
+            LEFT JOIN doctor_specialties ds ON d.doctor_id = ds.doctor_id
+            LEFT JOIN Specialties sp ON ds.specialty_id = sp.specialty_id
+            GROUP BY s.staff_id, s.user_id, s.name, s.contact_info, s.is_medical_staff, s.branch_id, r.name, b.name, ai.username, ai.email
             ORDER BY branch_name, role_name, s.name
         `);
         res.json(rows);
     } catch (err) { handleDatabaseError(res, err); }
 });
-
 app.post("/api/staff", authorize(['admin', 'branch manager']), async (req, res) => {
     const connection = await pool.getConnection();
     try {
@@ -390,22 +405,37 @@ app.post("/api/staff", authorize(['admin', 'branch manager']), async (req, res) 
 });
 app.get("/api/staff/:id", authorize(['admin']), async (req, res) => {
     try {
-        const [rows] = await pool.query(`
+        const [staffRows] = await pool.query(`
             SELECT 
                 s.staff_id, s.name, s.contact_info, s.branch_id, s.is_medical_staff,
-                ai.role_id, ai.username, ai.email,
-                ds.specialty_id
+                ai.role_id, ai.username, ai.email
             FROM Staff s 
             LEFT JOIN Account_Info ai ON s.user_id = ai.user_id
-            LEFT JOIN Doctor d ON s.staff_id = d.staff_id
-            LEFT JOIN doctor_specialties ds ON d.doctor_id = ds.doctor_id
             WHERE s.staff_id = ?
         `, [req.params.id]);
 
-        if (rows.length === 0) {
+        if (staffRows.length === 0) {
             return res.status(404).json({ message: "Staff not found" });
         }
-        res.json(rows[0]);
+
+        const staffData = staffRows[0];
+
+        // Check if this staff is a doctor and get specialties
+        const [[doctor]] = await pool.query("SELECT doctor_id FROM Doctor WHERE staff_id = ?", [staffData.staff_id]);
+
+        if (doctor) {
+            const [specialtyRows] = await pool.query(
+                "SELECT specialty_id FROM doctor_specialties WHERE doctor_id = ?",
+                [doctor.doctor_id]
+            );
+            // Attach an array of specialty IDs
+            staffData.specialty_ids = specialtyRows.map(r => r.specialty_id);
+        } else {
+            staffData.specialty_ids = [];
+        }
+
+        res.json(staffData);
+
     } catch (err) {
         handleDatabaseError(res, err);
     }
@@ -1089,7 +1119,20 @@ app.get("/api/branch-manager/appointments", authorize(['branch manager']), getBr
 
 app.get("/api/branch-manager/staff", authorize(['branch manager']), getBranchInfoFromToken, async (req, res) => {
     try {
-        const [rows] = await pool.query(`SELECT s.staff_id, s.name, s.contact_info, s.is_medical_staff, r.name as role_name, sp.name as specialty_name FROM Staff s JOIN Account_Info ai ON s.user_id = ai.user_id JOIN Role r ON ai.role_id = r.role_id LEFT JOIN Doctor d ON s.staff_id = d.staff_id LEFT JOIN doctor_specialties ds ON d.doctor_id = ds.doctor_id LEFT JOIN Specialties sp ON ds.specialty_id = sp.specialty_id WHERE s.branch_id = ? AND r.name NOT IN ('Branch Manager','Admin') ORDER BY s.name ASC`, [req.branchId]);
+        const [rows] = await pool.query(`
+            SELECT 
+                s.staff_id, s.name, s.contact_info, s.is_medical_staff, r.name as role_name, 
+                GROUP_CONCAT(DISTINCT sp.name SEPARATOR ', ') as specialty_name
+            FROM Staff s 
+            JOIN Account_Info ai ON s.user_id = ai.user_id 
+            JOIN Role r ON ai.role_id = r.role_id 
+            LEFT JOIN Doctor d ON s.staff_id = d.staff_id 
+            LEFT JOIN doctor_specialties ds ON d.doctor_id = ds.doctor_id 
+            LEFT JOIN Specialties sp ON ds.specialty_id = sp.specialty_id 
+            WHERE s.branch_id = ? AND r.name NOT IN ('Branch Manager','Admin') 
+            GROUP BY s.staff_id, s.name, s.contact_info, s.is_medical_staff, r.name 
+            ORDER BY s.name ASC
+        `, [req.branchId]);
         res.json(rows);
     } catch (err) { handleDatabaseError(res, err); }
 });
@@ -1341,15 +1384,16 @@ app.get("/api/patient/doctors", authorize(['patient']), async (req, res) => {
             SELECT 
                 d.doctor_id, 
                 s.name, 
-                sp.name as specialty,
-                b.branch_id,        -- <-- ADDED
-                b.name as branch_name -- <-- ADDED
+                b.branch_id, 
+                b.name as branch_name,
+                GROUP_CONCAT(DISTINCT sp.name SEPARATOR ', ') as specialty
             FROM Doctor d 
             JOIN Staff s ON d.staff_id = s.staff_id 
-            JOIN Branch b ON s.branch_id = b.branch_id  -- <-- ADDED
+            JOIN Branch b ON s.branch_id = b.branch_id
             LEFT JOIN doctor_specialties ds ON d.doctor_id = ds.doctor_id 
             LEFT JOIN Specialties sp ON ds.specialty_id = sp.specialty_id 
-            ORDER BY b.name, s.name  -- <-- UPDATED ORDER
+            GROUP BY d.doctor_id, s.name, b.branch_id, b.name
+            ORDER BY b.name, s.name
         `);
         res.json(rows);
     } catch (err) {
