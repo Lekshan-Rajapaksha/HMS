@@ -122,10 +122,10 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     const renderPatientsTable = data => renderTable(data, ["ID", "Name", "Age", "Contact"], p => `<tr><td>${p.patient_id}</td><td>${p.name}</td><td>${p.age}</td><td>${p.contact_info || ""}</td><td class="table-actions"><button class="btn btn-sm btn-outline-secondary" data-action="edit" data-type="patient" data-id="${p.patient_id}"><i class="bi bi-pencil-fill"></i></button></td></tr>`, "No patients found.");
-    const renderBranchesTable = data => renderTable(data, ["ID", "Name", "Address", "Contact"], b => `<tr><td>${b.branch_id}</td><td>${b.name}</td><td>${b.address || ''}</td><td>${b.contact_number || ''}</td><td class="table-actions"><button class="btn btn-sm btn-outline-secondary" data-action="edit" data-type="branch" data-id="${b.branch_id}"><i class="bi bi-pencil-fill"></i></button></td></tr>`, "No branches found.");
-    const renderProvidersTable = data => renderTable(data, ["ID", "Name", "Contact Number"], i => `<tr><td>${i.id}</td><td>${i.name}</td><td>${i.contact_number}</td><td class="table-actions"><button class="btn btn-sm btn-outline-secondary" data-action="edit" data-type="insurance-provider" data-id="${i.id}"><i class="bi bi-pencil-fill"></i></button></td></tr>`, "No insurance providers found.");
-    const renderTreatmentsTable = data => renderTable(data, ["Code", "Name", "Price"], t => `<tr><td>${t.service_code}</td><td>${t.name}</td><td>Rs.${parseFloat(t.price).toFixed(2)}</td><td class="table-actions"><button class="btn btn-sm btn-outline-secondary" data-action="edit" data-type="treatment" data-id="${t.service_code}"><i class="bi bi-pencil-fill"></i></button></td></tr>`, "No treatments found.");
-    const renderSpecialtiesTable = data => renderTable(data, ["ID", "Name", "Description"], s => `<tr><td>${s.specialty_id}</td><td>${s.name}</td><td>${s.description || ''}</td><td class="table-actions"><button class="btn btn-sm btn-outline-secondary" data-action="edit" data-type="specialty" data-id="${s.specialty_id}"><i class="bi bi-pencil-fill"></i></button></td></tr>`, "No specialties found.");
+    const renderBranchesTable = data => renderTable(data, ["ID", "Name", "Address", "Contact"], b => `<tr><td>${b.branch_id}</td><td>${b.name}</td><td>${b.address || ''}</td><td>${b.contact_number || ''}</td><td class="table-actions"><button class="btn btn-sm btn-outline-secondary" data-action="edit" data-type="branch" data-id="${b.branch_id}"><i class="bi bi-pencil-fill"></i></button><button class="btn btn-sm btn-outline-danger" data-action="delete" data-type="branch" data-id="${b.branch_id}"><i class="bi bi-trash-fill"></i></button></td></tr>`, "No branches found.");
+    const renderProvidersTable = data => renderTable(data, ["ID", "Name", "Contact Number"], i => `<tr><td>${i.id}</td><td>${i.name}</td><td>${i.contact_number}</td><td class="table-actions"><button class="btn btn-sm btn-outline-secondary" data-action="edit" data-type="insurance-provider" data-id="${i.id}"><i class="bi bi-pencil-fill"></i></button><button class="btn btn-sm btn-outline-danger" data-action="delete" data-type="insurance-provider" data-id="${i.id}"><i class="bi bi-trash-fill"></i></button></td></tr>`, "No insurance providers found.");
+    const renderTreatmentsTable = data => renderTable(data, ["Code", "Name", "Price"], t => `<tr><td>${t.service_code}</td><td>${t.name}</td><td>Rs.${parseFloat(t.price).toFixed(2)}</td><td class="table-actions"><button class="btn btn-sm btn-outline-secondary" data-action="edit" data-type="treatment" data-id="${t.service_code}"><i class="bi bi-pencil-fill"></i></button><button class="btn btn-sm btn-outline-danger" data-action="delete" data-type="treatment" data-id="${t.service_code}"><i class="bi bi-trash-fill"></i></button></td></tr>`, "No treatments found.");
+    const renderSpecialtiesTable = data => renderTable(data, ["ID", "Name", "Description"], s => `<tr><td>${s.specialty_id}</td><td>${s.name}</td><td>${s.description || ''}</td><td class="table-actions"><button class="btn btn-sm btn-outline-secondary" data-action="edit" data-type="specialty" data-id="${s.specialty_id}"><i class="bi bi-pencil-fill"></i></button><button class="btn btn-sm btn-outline-danger" data-action="delete" data-type="specialty" data-id="${s.specialty_id}"><i class="bi bi-trash-fill"></i></button></td></tr>`, "No specialties found.");
     // [ADD THIS NEW FUNCTION]
     const renderStaffAccordions = (data) => {
         const container = document.getElementById("staff-accordion-container");
@@ -194,10 +194,13 @@ document.addEventListener("DOMContentLoaded", () => {
             `;
                 // 4. Add staff members as rows
                 staffInRole.forEach(s => {
+                    const specialtyDisplay = s.role_name.toLowerCase() === 'doctor' && s.doctor_specialties?.length > 0
+                        ? `<br><small class="text-muted">${s.doctor_specialties.map(sp => `<span class="badge bg-info">${sp}</span>`).join(' ')}</small>`
+                        : '';
                     accordionHTML += `
                     <tr>
                         <td>${s.staff_id}</td>
-                        <td>${s.name} ${s.is_medical_staff ? '<i class="bi bi-heart-pulse text-primary" title="Medical Staff"></i>' : ""}</td>
+                        <td>${s.name} ${s.is_medical_staff ? '<i class="bi bi-heart-pulse text-primary" title="Medical Staff"></i>' : ""}${specialtyDisplay}</td>
                         <td>${s.contact_info || ''}</td>
                         <td>${s.username || ''}</td>
                         <td>${s.email || ''}</td>
@@ -365,26 +368,522 @@ document.addEventListener("DOMContentLoaded", () => {
     const loadReportsPage = () => {
         mainContent.innerHTML = `
             <h1>Reports</h1>
-            <p class="text-muted">Select a report to view details.</p>
-            <div class="list-group">
-                <a href="#" class="list-group-item list-group-item-action" data-report="branch-summary"><i class="bi bi-building-fill me-2"></i>Branch Appointment Summary</a>
-                <a href="#" class="list-group-item list-group-item-action" data-report="doctor-revenue"><i class="bi bi-person-hearts me-2"></i>Doctor Revenue Report</a>
-                <a href="#" class="list-group-item list-group-item-action" data-report="outstanding-patients"><i class="bi bi-person-exclamation me-2"></i>Patients with Outstanding Balances</a>
-                <a href="#" class="list-group-item list-group-item-action" data-report="treatment-stats"><i class="bi bi-card-list me-2"></i>Treatment Statistics</a>
-                <a href="#" class="list-group-item list-group-item-action" data-report="insurance-analysis"><i class="bi bi-shield-check me-2"></i>Insurance Coverage Analysis</a>
+            <p class="text-muted">Select a report to view details and analysis.</p>
+            <div class="row g-3">
+                <div class="col-lg-6">
+                    <div class="card report-card h-100" data-report="branch-summary" style="cursor: pointer; border-left: 4px solid #6a5af9;">
+                        <div class="card-body">
+                            <div class="d-flex align-items-start justify-content-between mb-2">
+                                <div>
+                                    <h5 class="card-title fw-bold mb-1">Branch Appointment Summary</h5>
+                                    <p class="card-text text-muted small mb-0">View daily appointment statistics by branch with detailed breakdown.</p>
+                                </div>
+                                <i class="bi bi-building-fill fs-5 text-primary"></i>
+                            </div>
+                            <div class="mt-3 pt-2 border-top">
+                                <span class="badge bg-light text-dark">5 Branches</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-lg-6">
+                    <div class="card report-card h-100" data-report="doctor-revenue" style="cursor: pointer; border-left: 4px solid #28a745;">
+                        <div class="card-body">
+                            <div class="d-flex align-items-start justify-content-between mb-2">
+                                <div>
+                                    <h5 class="card-title fw-bold mb-1">Doctor Revenue Report</h5>
+                                    <p class="card-text text-muted small mb-0">Track revenue generated by each doctor with specialties and payment breakdown.</p>
+                                </div>
+                                <i class="bi bi-person-hearts fs-5 text-success"></i>
+                            </div>
+                            <div class="mt-3 pt-2 border-top">
+                                <span class="badge bg-light text-dark">Revenue Tracking</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-lg-6">
+                    <div class="card report-card h-100" data-report="outstanding-patients" style="cursor: pointer; border-left: 4px solid #dc3545;">
+                        <div class="card-body">
+                            <div class="d-flex align-items-start justify-content-between mb-2">
+                                <div>
+                                    <h5 class="card-title fw-bold mb-1">Outstanding Balances</h5>
+                                    <p class="card-text text-muted small mb-0">Monitor patients with pending or overdue payments with detailed balance information.</p>
+                                </div>
+                                <i class="bi bi-person-exclamation fs-5 text-danger"></i>
+                            </div>
+                            <div class="mt-3 pt-2 border-top">
+                                <span class="badge bg-light text-dark">Payment Tracking</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-lg-6">
+                    <div class="card report-card h-100" data-report="treatment-stats" style="cursor: pointer; border-left: 4px solid #ffc107;">
+                        <div class="card-body">
+                            <div class="d-flex align-items-start justify-content-between mb-2">
+                                <div>
+                                    <h5 class="card-title fw-bold mb-1">Treatment Statistics</h5>
+                                    <p class="card-text text-muted small mb-0">Analyze treatment utilization and revenue trends by service type and time period.</p>
+                                </div>
+                                <i class="bi bi-card-list fs-5 text-warning"></i>
+                            </div>
+                            <div class="mt-3 pt-2 border-top">
+                                <span class="badge bg-light text-dark">Service Analysis</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-lg-6">
+                    <div class="card report-card h-100" data-report="insurance-analysis" style="cursor: pointer; border-left: 4px solid #17a2b8;">
+                        <div class="card-body">
+                            <div class="d-flex align-items-start justify-content-between mb-2">
+                                <div>
+                                    <h5 class="card-title fw-bold mb-1">Insurance Coverage Analysis</h5>
+                                    <p class="card-text text-muted small mb-0">Review insurance claims, coverage rates, and out-of-pocket payment patterns by provider.</p>
+                                </div>
+                                <i class="bi bi-shield-check fs-5 text-info"></i>
+                            </div>
+                            <div class="mt-3 pt-2 border-top">
+                                <span class="badge bg-light text-dark">Coverage Insights</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>`;
     };
 
     const loadAndRenderReport = async (reportName, title, headers, rowGenerator) => {
-        detailsModalLabel.textContent = title;
+        switch (reportName) {
+            case 'branch-summary':
+                loadBranchSummaryReport();
+                break;
+            case 'doctor-revenue':
+                loadDoctorRevenueReport();
+                break;
+            case 'outstanding-patients':
+                loadOutstandingPatientsReport();
+                break;
+            case 'treatment-stats':
+                loadTreatmentStatsReport();
+                break;
+            case 'insurance-analysis':
+                loadInsuranceAnalysisReport();
+                break;
+            default:
+                detailsModalLabel.textContent = title;
+                renderSpinner(detailsModalBody);
+                detailsModal.show();
+                const data = await authorizedFetch(`/api/reports/${reportName}`);
+                if (data) {
+                    detailsModalBody.innerHTML = `<div class="table-responsive"><table class="table"><thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${data.map(rowGenerator).join('')}</tbody></table></div>`;
+                } else {
+                    detailsModalBody.innerHTML = `<p class="text-center p-4">Could not load report data.</p>`;
+                }
+        }
+    };
+
+    const loadBranchSummaryReport = async () => {
+        detailsModalLabel.textContent = 'Branch Appointment Summary';
         renderSpinner(detailsModalBody);
         detailsModal.show();
-        const data = await authorizedFetch(`/api/reports/${reportName}`);
-        if (data) {
-            detailsModalBody.innerHTML = `<div class="table-responsive"><table class="table"><thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${data.map(rowGenerator).join('')}</tbody></table></div>`;
-        } else {
+
+        const [reportData, branches] = await Promise.all([
+            authorizedFetch('/api/reports/branch-summary'),
+            authorizedFetch('/api/list/branches')
+        ]);
+
+        if (!reportData || !branches) {
             detailsModalBody.innerHTML = `<p class="text-center p-4">Could not load report data.</p>`;
+            return;
         }
+
+        const selectedBranch = branches.length > 0 ? branches[0].branch_id : null;
+        renderBranchSummaryContent(reportData, branches, selectedBranch);
+    };
+
+    const renderBranchSummaryContent = (allData, branches, selectedBranchId) => {
+        const filteredData = allData.filter(item => item.branch_id == selectedBranchId);
+        const selectedBranchName = branches.find(b => b.branch_id == selectedBranchId)?.name || 'Unknown';
+
+        const groupedByDate = {};
+        filteredData.forEach(item => {
+            const date = new Date(item.appointment_date).toLocaleDateString();
+            if (!groupedByDate[date]) {
+                groupedByDate[date] = { total: 0, scheduled: 0, completed: 0, cancelled: 0, rawDate: item.appointment_date };
+            }
+            groupedByDate[date].total += item.total_appointments;
+            groupedByDate[date].scheduled += item.scheduled;
+            groupedByDate[date].completed += item.completed;
+            groupedByDate[date].cancelled += item.cancelled;
+        });
+
+        const branchOptions = branches.map(b => `<option value="${b.branch_id}" ${b.branch_id == selectedBranchId ? 'selected' : ''}>${b.name}</option>`).join('');
+
+        let content = `
+            <div class="mb-4">
+                <label class="form-label fw-bold">Select Branch:</label>
+                <select id="branch-selector" class="form-select">
+                    ${branchOptions}
+                </select>
+            </div>
+            <div class="branch-summary-container">
+        `;
+
+        if (Object.keys(groupedByDate).length === 0) {
+            content += `<p class="text-center text-muted py-5">No appointments for this branch.</p>`;
+        } else {
+            const sortedDates = Object.keys(groupedByDate).sort((a, b) => new Date(groupedByDate[b].rawDate) - new Date(groupedByDate[a].rawDate));
+            sortedDates.forEach((date, index) => {
+                const stats = groupedByDate[date];
+                const dateKey = `date-${index}`;
+                content += `
+                    <div class="card mb-3 branch-day-card" data-date="${date}" style="cursor: pointer;">
+                        <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                            <div class="d-flex align-items-center gap-2">
+                                <h6 class="mb-0 fw-bold">${date}</h6>
+                                <i class="bi bi-chevron-down toggle-icon" id="toggle-${dateKey}"></i>
+                            </div>
+                            <span class="badge bg-primary">${stats.total} Total</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="row text-center">
+                                <div class="col-sm-4">
+                                    <div class="py-2">
+                                        <small class="text-muted d-block">Scheduled</small>
+                                        <h5 class="text-info fw-bold">${stats.scheduled}</h5>
+                                    </div>
+                                </div>
+                                <div class="col-sm-4">
+                                    <div class="py-2">
+                                        <small class="text-muted d-block">Completed</small>
+                                        <h5 class="text-success fw-bold">${stats.completed}</h5>
+                                    </div>
+                                </div>
+                                <div class="col-sm-4">
+                                    <div class="py-2">
+                                        <small class="text-muted d-block">Cancelled</small>
+                                        <h5 class="text-danger fw-bold">${stats.cancelled}</h5>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="appointment-details" id="details-${dateKey}" style="display: none;">
+                            <div class="card-body border-top" id="details-body-${dateKey}">
+                                <p class="text-center text-muted">Loading appointments...</p>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
+        content += `</div>`;
+        detailsModalBody.innerHTML = content;
+
+        document.getElementById('branch-selector').addEventListener('change', (e) => {
+            renderBranchSummaryContent(allData, branches, e.target.value);
+        });
+
+        document.querySelectorAll('.branch-day-card').forEach((card, index) => {
+            card.addEventListener('click', async (e) => {
+                const dateKey = `date-${index}`;
+                const detailsDiv = document.getElementById(`details-${dateKey}`);
+                const detailsBody = document.getElementById(`details-body-${dateKey}`);
+                const toggleIcon = document.getElementById(`toggle-${dateKey}`);
+
+                if (detailsDiv.style.display === 'none') {
+                    const date = card.dataset.date;
+                    detailsBody.innerHTML = '<p class="text-center text-muted">Loading appointments...</p>';
+                    detailsDiv.style.display = 'block';
+                    toggleIcon.style.transform = 'rotate(180deg)';
+
+                    const appointments = await authorizedFetch(`/api/appointments`);
+                    if (appointments) {
+                        const dateAppointments = appointments.filter(appt => {
+                            const apptDate = new Date(appt.schedule_date).toLocaleDateString();
+                            return apptDate === date && appt.branch_id == selectedBranchId;
+                        });
+
+                        if (dateAppointments.length === 0) {
+                            detailsBody.innerHTML = '<p class="text-center text-muted py-3">No appointments for this date.</p>';
+                        } else {
+                            let appointmentHTML = `
+                                <div class="table-responsive">
+                                    <table class="table table-sm mb-0">
+                                        <thead>
+                                            <tr>
+                                                <th>Time</th>
+                                                <th>Patient</th>
+                                                <th>Doctor</th>
+                                                <th>Status</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                            `;
+                            dateAppointments.forEach(appt => {
+                                const time = new Date(appt.schedule_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                                const statusColor = appt.status === 'Completed' ? 'success' : appt.status === 'Cancelled' ? 'danger' : 'info';
+                                appointmentHTML += `
+                                    <tr>
+                                        <td><strong>${time}</strong></td>
+                                        <td>${appt.patient_name}</td>
+                                        <td>${appt.doctor_name}</td>
+                                        <td><span class="badge bg-${statusColor}">${appt.status}</span></td>
+                                    </tr>
+                                `;
+                            });
+                            appointmentHTML += `</tbody></table></div>`;
+                            detailsBody.innerHTML = appointmentHTML;
+                        }
+                    }
+                } else {
+                    detailsDiv.style.display = 'none';
+                    toggleIcon.style.transform = 'rotate(0deg)';
+                }
+            });
+        });
+    };
+
+    const loadDoctorRevenueReport = async () => {
+        detailsModalLabel.textContent = 'Doctor Revenue Report';
+        renderSpinner(detailsModalBody);
+        detailsModal.show();
+
+        const data = await authorizedFetch('/api/reports/doctor-revenue');
+        if (!data) {
+            detailsModalBody.innerHTML = `<p class="text-center p-4">Could not load report data.</p>`;
+            return;
+        }
+
+        let content = `<div class="revenue-report-container">`;
+
+        if (data.length === 0) {
+            content += `<p class="text-center text-muted py-5">No doctor revenue data available.</p>`;
+        } else {
+            data.forEach((doctor, index) => {
+                const docKey = `doctor-${index}`;
+                content += `
+                    <div class="card mb-3 report-card" data-doctor="${doctor.doctor_id}" style="cursor: pointer;">
+                        <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                            <div class="d-flex align-items-center gap-2">
+                                <h6 class="mb-0 fw-bold">${doctor.doctor_name}</h6>
+                                <span class="badge bg-secondary">${doctor.specialty || 'No Specialty'}</span>
+                                <i class="bi bi-chevron-down toggle-icon" id="toggle-${docKey}"></i>
+                            </div>
+                            <span class="badge bg-success">Rs.${parseFloat(doctor.total_revenue || 0).toFixed(2)}</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="row text-center small">
+                                <div class="col-sm-3">
+                                    <small class="text-muted d-block">Appointments</small>
+                                    <h6 class="fw-bold">${doctor.total_appointments || 0}</h6>
+                                </div>
+                                <div class="col-sm-3">
+                                    <small class="text-muted d-block">Insured Revenue</small>
+                                    <h6 class="fw-bold">Rs.${parseFloat(doctor.insurance_coverage || 0).toFixed(2)}</h6>
+                                </div>
+                                <div class="col-sm-3">
+                                    <small class="text-muted d-block">Out-of-Pocket</small>
+                                    <h6 class="fw-bold">Rs.${parseFloat(doctor.out_of_pocket_revenue || 0).toFixed(2)}</h6>
+                                </div>
+                                <div class="col-sm-3">
+                                    <small class="text-muted d-block">Outstanding</small>
+                                    <h6 class="fw-bold text-warning">Rs.${parseFloat(doctor.outstanding_balance || 0).toFixed(2)}</h6>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
+        content += `</div>`;
+        detailsModalBody.innerHTML = content;
+    };
+
+    const loadOutstandingPatientsReport = async () => {
+        detailsModalLabel.textContent = 'Patients with Outstanding Balances';
+        renderSpinner(detailsModalBody);
+        detailsModal.show();
+
+        const data = await authorizedFetch('/api/reports/outstanding-patients');
+        if (!data) {
+            detailsModalBody.innerHTML = `<p class="text-center p-4">Could not load report data.</p>`;
+            return;
+        }
+
+        let content = `<div class="outstanding-report-container">`;
+
+        if (data.length === 0) {
+            content += `<p class="text-center text-muted py-5">No patients with outstanding balances.</p>`;
+        } else {
+            const sortedData = [...data].sort((a, b) => new Date(b.latest_due_date) - new Date(a.latest_due_date));
+            sortedData.forEach((patient, index) => {
+                const patKey = `patient-${index}`;
+                const statusBadge = patient.payment_status === 'Overdue' ? `<span class="badge bg-danger">Overdue</span>` : `<span class="badge bg-warning">Pending</span>`;
+                content += `
+                    <div class="card mb-3">
+                        <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                            <div>
+                                <h6 class="mb-0 fw-bold">${patient.patient_name}</h6>
+                                <small class="text-muted">${patient.contact_info}</small>
+                            </div>
+                            <div class="text-end">
+                                ${statusBadge}
+                                <div class="mt-2">
+                                    <h5 class="mb-0 text-danger fw-bold">Rs.${parseFloat(patient.total_outstanding).toFixed(2)}</h5>
+                                    <small class="text-muted">Due: ${new Date(patient.latest_due_date).toLocaleDateString()}</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card-body small">
+                            <div class="row">
+                                <div class="col-sm-4">
+                                    <span class="text-muted">Total Invoices: </span><strong>${patient.total_invoices}</strong>
+                                </div>
+                                <div class="col-sm-4">
+                                    <span class="text-muted">Total Billed: </span><strong>Rs.${parseFloat(patient.total_billed).toFixed(2)}</strong>
+                                </div>
+                                <div class="col-sm-4">
+                                    <span class="text-muted">Outstanding: </span><strong class="text-danger">Rs.${parseFloat(patient.total_outstanding).toFixed(2)}</strong>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
+        content += `</div>`;
+        detailsModalBody.innerHTML = content;
+    };
+
+    const loadTreatmentStatsReport = async () => {
+        detailsModalLabel.textContent = 'Treatment Statistics';
+        renderSpinner(detailsModalBody);
+        detailsModal.show();
+
+        const data = await authorizedFetch('/api/reports/treatment-stats');
+        if (!data) {
+            detailsModalBody.innerHTML = `<p class="text-center p-4">Could not load report data.</p>`;
+            return;
+        }
+
+        const groupedByTreatment = {};
+        data.forEach(item => {
+            const code = item.service_code;
+            if (!groupedByTreatment[code]) {
+                groupedByTreatment[code] = {
+                    name: item.treatment_name,
+                    total_performed: 0,
+                    total_revenue: 0,
+                    months: []
+                };
+            }
+            groupedByTreatment[code].total_performed += item.times_performed || 0;
+            groupedByTreatment[code].total_revenue += parseFloat(item.total_revenue || 0);
+            groupedByTreatment[code].months.push({ month: item.month, performed: item.times_performed || 0, revenue: item.total_revenue || 0 });
+        });
+
+        let content = `<div class="treatment-report-container">`;
+
+        if (Object.keys(groupedByTreatment).length === 0) {
+            content += `<p class="text-center text-muted py-5">No treatment data available.</p>`;
+        } else {
+            Object.entries(groupedByTreatment).forEach(([code, treatment], index) => {
+                const treatKey = `treatment-${index}`;
+                content += `
+                    <div class="card mb-3">
+                        <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                            <div>
+                                <h6 class="mb-0 fw-bold">${treatment.name}</h6>
+                                <small class="text-muted">Code: ${code}</small>
+                            </div>
+                            <div class="text-end">
+                                <h5 class="mb-0 text-success fw-bold">Rs.${treatment.total_revenue.toFixed(2)}</h5>
+                                <small class="text-muted">${treatment.total_performed} performed</small>
+                            </div>
+                        </div>
+                        <div class="card-body small">
+                            <div class="table-responsive">
+                                <table class="table table-sm mb-0">
+                                    <thead class="table-light">
+                                        <tr><th>Month</th><th class="text-end">Times Performed</th><th class="text-end">Revenue</th></tr>
+                                    </thead>
+                                    <tbody>
+                                        ${treatment.months.map(m => `<tr><td>${m.month || 'N/A'}</td><td class="text-end">${m.performed}</td><td class="text-end">Rs.${parseFloat(m.revenue).toFixed(2)}</td></tr>`).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
+        content += `</div>`;
+        detailsModalBody.innerHTML = content;
+    };
+
+    const loadInsuranceAnalysisReport = async () => {
+        detailsModalLabel.textContent = 'Insurance Coverage Analysis';
+        renderSpinner(detailsModalBody);
+        detailsModal.show();
+
+        const data = await authorizedFetch('/api/reports/insurance-analysis');
+        if (!data) {
+            detailsModalBody.innerHTML = `<p class="text-center p-4">Could not load report data.</p>`;
+            return;
+        }
+
+        let content = `<div class="insurance-report-container">`;
+
+        if (data.length === 0) {
+            content += `<p class="text-center text-muted py-5">No insurance data available.</p>`;
+        } else {
+            data.forEach((provider, index) => {
+                const totalBilled = parseFloat(provider.total_billed || 0);
+                const insuredAmount = parseFloat(provider.total_insurance_coverage || 0);
+                const outOfPocket = parseFloat(provider.total_out_of_pocket || 0);
+                const coveragePercent = provider.avg_coverage_percent || 0;
+
+                content += `
+                    <div class="card mb-3">
+                        <div class="card-header bg-light">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <h6 class="mb-0 fw-bold">${provider.insurance_provider}</h6>
+                                <span class="badge bg-info">${provider.total_patients || 0} Patients</span>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="row mb-3">
+                                <div class="col-sm-6">
+                                    <small class="text-muted d-block">Total Billed</small>
+                                    <h5 class="fw-bold">Rs.${totalBilled.toFixed(2)}</h5>
+                                </div>
+                                <div class="col-sm-6 text-end">
+                                    <small class="text-muted d-block">Coverage %</small>
+                                    <h5 class="fw-bold text-success">${coveragePercent}%</h5>
+                                </div>
+                            </div>
+                            <hr class="my-2">
+                            <div class="row small">
+                                <div class="col-sm-6">
+                                    <span class="text-muted">Insurance Coverage: </span><strong>Rs.${insuredAmount.toFixed(2)}</strong>
+                                </div>
+                                <div class="col-sm-6 text-end">
+                                    <span class="text-muted">Out-of-Pocket: </span><strong>Rs.${outOfPocket.toFixed(2)}</strong>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
+        content += `</div>`;
+        detailsModalBody.innerHTML = content;
     };
 
     const loadPatientsPage = async () => { createPageTemplate({ title: "Patients", type: "patient", headers: ["ID", "Name", "Age", "Contact"] }); renderSpinner(document.getElementById('table-body')); currentViewData = await authorizedFetch("/api/patients"); renderPatientsTable(currentViewData); setupSearch(renderPatientsTable, ['patient_id', 'name', 'contact_info']); };
@@ -486,7 +985,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 <div class="col-md-6 mb-3"><label>Username</label><input type="text" name="username" class="form-control" value="${staffData.username || ''}" required></div>
                 <div class="col-md-6 mb-3"><label>Email</label><input type="email" name="email" class="form-control" value="${staffData.email || ''}" required></div>
                 <div class="col-md-6 mb-3"><label>Role</label><select name="role_id" class="form-select" required>${createOptions(roles, "role_id", "name", staffData.role_id)}</select></div>
-                <div class="col-md-6 mb-3 d-none" id="specialty-container"><label>Specialty</label><select name="specialty_id" class="form-select">${createOptions(specialties, "specialty_id", "name", staffData.specialty_id)}</select></div>
+                <div class="col-md-6 mb-3 d-none" id="specialty-container"><label>Specialties</label><div id="specialty-checkboxes" class="border rounded p-2" style="max-height: 200px; overflow-y: auto;">${specialties?.map(s => `<div class="form-check"><input type="checkbox" class="form-check-input specialty-checkbox" name="specialties" value="${s.specialty_id}" id="spec-${s.specialty_id}" ${staffData.doctor_specialties?.includes(s.specialty_id) ? 'checked' : ''}><label class="form-check-label" for="spec-${s.specialty_id}">${s.name}</label></div>`).join('')}</div></div>
                 <div class="col-md-6 mb-3"><label>Password</label><input type="password" name="password" class="form-control" placeholder="${isEditing ? 'Leave blank to keep unchanged' : ''}" ${!isEditing ? 'required' : ''}></div>
             </div>
             <div class="modal-footer mt-4"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button><button type="submit" class="btn btn-primary">Save</button></div>
@@ -509,7 +1008,14 @@ document.addEventListener("DOMContentLoaded", () => {
         // Handle form submission
         document.getElementById("modal-form").onsubmit = e => {
             e.preventDefault();
-            const data = Object.fromEntries(new FormData(e.target));
+            const formData = new FormData(e.target);
+            const data = Object.fromEntries(formData);
+
+            // Handle multiple specialties for doctors
+            const specialtyCheckboxes = document.querySelectorAll('.specialty-checkbox:checked');
+            if (specialtyCheckboxes.length > 0) {
+                data.specialties = Array.from(specialtyCheckboxes).map(cb => cb.value);
+            }
 
             // On edit, if password field is empty, don't send it
             if (isEditing && !data.password) {
@@ -578,8 +1084,18 @@ document.addEventListener("DOMContentLoaded", () => {
         if (action === "add" || action === "edit") {
             entityMap[type]?.handler(id);
         }
-        if (action === "delete" && type === "staff") {
-            deleteItem(`/api/staff/${id}`, 'staff member', loadStaffPage);
+        if (action === "delete") {
+            const deleteMap = {
+                'staff': { endpoint: `/api/staff/${id}`, name: 'staff member', callback: loadStaffPage },
+                'branch': { endpoint: `/api/branches/${id}`, name: 'branch', callback: loadBranchesPage },
+                'insurance-provider': { endpoint: `/api/insurance-providers/${id}`, name: 'insurance provider', callback: loadInsuranceProvidersPage },
+                'treatment': { endpoint: `/api/treatments/${id}`, name: 'treatment', callback: loadTreatmentsPage },
+                'specialty': { endpoint: `/api/specialties/${id}`, name: 'specialty', callback: loadSpecialtiesPage }
+            };
+            const deleteConfig = deleteMap[type];
+            if (deleteConfig) {
+                deleteItem(deleteConfig.endpoint, deleteConfig.name, deleteConfig.callback);
+            }
         }
     });
 

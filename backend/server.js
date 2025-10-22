@@ -156,7 +156,7 @@ app.get("/api/stats/monthly-revenue", authorize(['admin']), async (req, res) => 
             FROM Invoice i
             WHERE YEAR(i.issued_date) = YEAR(CURDATE())
             GROUP BY DATE_FORMAT(i.issued_date, '%Y-%m')
-            ORDER BY i.issued_date ASC
+            ORDER BY DATE_FORMAT(i.issued_date, '%Y-%m') ASC
         `);
         res.json(rows);
     } catch (err) { handleDatabaseError(res, err); }
@@ -175,7 +175,7 @@ app.get("/api/stats/branch-revenue", authorize(['admin']), async (req, res) => {
             JOIN Branch b ON a.branch_id = b.branch_id
             WHERE YEAR(i.issued_date) = YEAR(CURDATE())
             GROUP BY b.branch_id, b.name
-            ORDER BY total_revenue DESC
+            ORDER BY SUM(i.total_amount) DESC
         `);
         res.json(rows);
     } catch (err) { handleDatabaseError(res, err); }
@@ -529,6 +529,154 @@ app.delete("/api/staff/:id", authorize(['admin']), async (req, res) => {
         if (err.message.startsWith("Cannot delete staff")) {
             return res.status(409).json({ message: err.message });
         }
+        handleDatabaseError(res, err);
+    } finally {
+        connection.release();
+    }
+});
+
+// DELETE Branch (Admin)
+app.delete("/api/branches/:id", authorize(['admin']), async (req, res) => {
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        const branchId = req.params.id;
+
+        // Check if branch has any appointments
+        const [[appointmentCheck]] = await connection.query(
+            "SELECT COUNT(*) as count FROM Appointment WHERE branch_id = ?",
+            [branchId]
+        );
+
+        if (appointmentCheck.count > 0) {
+            await connection.rollback();
+            return res.status(409).json({ message: "Cannot delete branch with existing appointments." });
+        }
+
+        // Delete branch
+        const [result] = await connection.query("DELETE FROM Branch WHERE branch_id = ?", [branchId]);
+
+        if (result.affectedRows === 0) {
+            await connection.rollback();
+            return res.status(404).json({ message: "Branch not found" });
+        }
+
+        await connection.commit();
+        res.status(204).send();
+    } catch (err) {
+        await connection.rollback();
+        handleDatabaseError(res, err);
+    } finally {
+        connection.release();
+    }
+});
+
+// DELETE Insurance Provider (Admin)
+app.delete("/api/insurance-providers/:id", authorize(['admin']), async (req, res) => {
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        const providerId = req.params.id;
+
+        // Check if provider has any patients
+        const [[patientCheck]] = await connection.query(
+            "SELECT COUNT(*) as count FROM Patient WHERE insurance_provider_id = ?",
+            [providerId]
+        );
+
+        if (patientCheck.count > 0) {
+            await connection.rollback();
+            return res.status(409).json({ message: "Cannot delete insurance provider with enrolled patients." });
+        }
+
+        // Delete insurance provider
+        const [result] = await connection.query("DELETE FROM Insurance_Provider WHERE id = ?", [providerId]);
+
+        if (result.affectedRows === 0) {
+            await connection.rollback();
+            return res.status(404).json({ message: "Insurance provider not found" });
+        }
+
+        await connection.commit();
+        res.status(204).send();
+    } catch (err) {
+        await connection.rollback();
+        handleDatabaseError(res, err);
+    } finally {
+        connection.release();
+    }
+});
+
+// DELETE Treatment (Admin)
+app.delete("/api/treatments/:code", authorize(['admin']), async (req, res) => {
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        const serviceCode = req.params.code;
+
+        // Check if treatment has any appointments
+        const [[appointmentCheck]] = await connection.query(
+            "SELECT COUNT(*) as count FROM Appointment_Treatment WHERE service_code = ?",
+            [serviceCode]
+        );
+
+        if (appointmentCheck.count > 0) {
+            await connection.rollback();
+            return res.status(409).json({ message: "Cannot delete treatment that has been used in appointments." });
+        }
+
+        // Delete treatment
+        const [result] = await connection.query("DELETE FROM Treatment_Catalogue WHERE service_code = ?", [serviceCode]);
+
+        if (result.affectedRows === 0) {
+            await connection.rollback();
+            return res.status(404).json({ message: "Treatment not found" });
+        }
+
+        await connection.commit();
+        res.status(204).send();
+    } catch (err) {
+        await connection.rollback();
+        handleDatabaseError(res, err);
+    } finally {
+        connection.release();
+    }
+});
+
+// DELETE Specialty (Admin)
+app.delete("/api/specialties/:id", authorize(['admin']), async (req, res) => {
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
+
+        const specialtyId = req.params.id;
+
+        // Check if specialty has any doctors
+        const [[doctorCheck]] = await connection.query(
+            "SELECT COUNT(*) as count FROM doctor_specialties WHERE specialty_id = ?",
+            [specialtyId]
+        );
+
+        if (doctorCheck.count > 0) {
+            await connection.rollback();
+            return res.status(409).json({ message: "Cannot delete specialty with doctors assigned." });
+        }
+
+        // Delete specialty
+        const [result] = await connection.query("DELETE FROM Specialties WHERE specialty_id = ?", [specialtyId]);
+
+        if (result.affectedRows === 0) {
+            await connection.rollback();
+            return res.status(404).json({ message: "Specialty not found" });
+        }
+
+        await connection.commit();
+        res.status(204).send();
+    } catch (err) {
+        await connection.rollback();
         handleDatabaseError(res, err);
     } finally {
         connection.release();
