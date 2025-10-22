@@ -33,6 +33,7 @@ DROP TABLE IF EXISTS Appointment_Treatment;
 DROP TABLE IF EXISTS Treatment_Catalogue;
 DROP TABLE IF EXISTS rescheduled_appointments;
 DROP TABLE IF EXISTS Appointment;
+DROP TABLE IF EXISTS doctor_availability;
 DROP TABLE IF EXISTS Patient;
 DROP TABLE IF EXISTS Insurance_Provider;
 DROP TABLE IF EXISTS doctor_specialties;
@@ -114,6 +115,21 @@ CREATE TABLE doctor_specialties (
     PRIMARY KEY (doctor_id, specialty_id),
     FOREIGN KEY (doctor_id) REFERENCES Doctor(doctor_id),
     FOREIGN KEY (specialty_id) REFERENCES Specialties(specialty_id)
+);
+
+-- Doctor Availability (Weekly Schedule)
+CREATE TABLE doctor_availability (
+    availability_id INT AUTO_INCREMENT PRIMARY KEY,
+    doctor_id INT NOT NULL,
+    day_of_week INT NOT NULL COMMENT '0=Sunday, 1=Monday, ..., 6=Saturday',
+    start_time TIME NOT NULL,
+    end_time TIME NOT NULL,
+    is_available BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (doctor_id) REFERENCES Doctor(doctor_id) ON DELETE CASCADE,
+    UNIQUE KEY unique_doctor_day (doctor_id, day_of_week, start_time, end_time),
+    INDEX idx_doctor_day (doctor_id, day_of_week)
 );
 
 -- Insurance Provider Table
@@ -544,9 +560,9 @@ INSERT INTO Branch (name, contact_number, address, manager_user_id) VALUES
 
 -- Insert Staff (Managers)
 INSERT INTO Staff (user_id, name, contact_info, is_medical_staff, branch_id) VALUES
-(2, 'Nimal Perera', '0771234567', FALSE, 1),  -- Colombo Manager
-(3, 'Sunil Wickramasinghe', '0772234567', FALSE, 2),  -- Kandy Manager
-(4, 'Kamal Silva', '0773234567', FALSE, 3);  -- Galle Manager
+(2, 'Nimal Perera', '0771234567', FALSE, 1),
+(3, 'Sunil Wickramasinghe', '0772234567', FALSE, 2),
+(4, 'Kamal Silva', '0773234567', FALSE, 3);
 
 -- Update branches with manager IDs
 UPDATE Branch SET manager_user_id = 2 WHERE branch_id = 1;
@@ -569,20 +585,58 @@ INSERT INTO Staff (user_id, name, contact_info, is_medical_staff, branch_id) VAL
 (13, 'Dr. Nimali Wickramasinghe', '0772134567', TRUE, 3);
 
 -- Insert Doctors
--- Corrected to reference only staff members who are doctors (staff_id 7 through 12)
 INSERT INTO Doctor (staff_id) VALUES
 (7), (8), (9), (10), (11), (12);
 
 -- Assign Doctor Specialties
 INSERT INTO doctor_specialties (doctor_id, specialty_id) VALUES
-(1, 1),  -- Dr. Silva - Cardiology
-(1, 6),  -- Dr. Silva - General Medicine
-(2, 2),  -- Dr. Fernando - Dermatology
-(3, 3),  -- Dr. Perera - Pediatrics
-(3, 6),  -- Dr. Perera - General Medicine
-(4, 4),  -- Dr. Rajapakse - Orthopedics
-(5, 5),  -- Dr. Jayawardena - Neurology
-(6, 6);  -- Dr. Wickramasinghe - General Medicine
+(1, 1),
+(1, 6),
+(2, 2),
+(3, 3),
+(3, 6),
+(4, 4),
+(5, 5),
+(6, 6);
+
+-- Insert Doctor Availability (Default: Mon-Fri 9 AM to 5 PM)
+INSERT INTO doctor_availability (doctor_id, day_of_week, start_time, end_time, is_available) VALUES
+-- Dr. Arjuna Silva (doctor_id 1)
+(1, 1, '09:00:00', '17:00:00', TRUE),
+(1, 2, '09:00:00', '17:00:00', TRUE),
+(1, 3, '09:00:00', '17:00:00', TRUE),
+(1, 4, '09:00:00', '17:00:00', TRUE),
+(1, 5, '09:00:00', '17:00:00', TRUE),
+-- Dr. Priyanka Fernando (doctor_id 2)
+(2, 1, '09:00:00', '17:00:00', TRUE),
+(2, 2, '09:00:00', '17:00:00', TRUE),
+(2, 3, '09:00:00', '17:00:00', TRUE),
+(2, 4, '09:00:00', '17:00:00', TRUE),
+(2, 5, '09:00:00', '17:00:00', TRUE),
+-- Dr. Rohan Perera (doctor_id 3)
+(3, 1, '09:00:00', '17:00:00', TRUE),
+(3, 2, '09:00:00', '17:00:00', TRUE),
+(3, 3, '09:00:00', '17:00:00', TRUE),
+(3, 4, '09:00:00', '17:00:00', TRUE),
+(3, 5, '09:00:00', '17:00:00', TRUE),
+-- Dr. Samantha Rajapakse (doctor_id 4)
+(4, 1, '09:00:00', '17:00:00', TRUE),
+(4, 2, '09:00:00', '17:00:00', TRUE),
+(4, 3, '09:00:00', '17:00:00', TRUE),
+(4, 4, '09:00:00', '17:00:00', TRUE),
+(4, 5, '09:00:00', '17:00:00', TRUE),
+-- Dr. Dinesh Jayawardena (doctor_id 5)
+(5, 1, '09:00:00', '17:00:00', TRUE),
+(5, 2, '09:00:00', '17:00:00', TRUE),
+(5, 3, '09:00:00', '17:00:00', TRUE),
+(5, 4, '09:00:00', '17:00:00', TRUE),
+(5, 5, '09:00:00', '17:00:00', TRUE),
+-- Dr. Nimali Wickramasinghe (doctor_id 6)
+(6, 1, '09:00:00', '17:00:00', TRUE),
+(6, 2, '09:00:00', '17:00:00', TRUE),
+(6, 3, '09:00:00', '17:00:00', TRUE),
+(6, 4, '09:00:00', '17:00:00', TRUE),
+(6, 5, '09:00:00', '17:00:00', TRUE);
 
 -- Insert Patients
 INSERT INTO Patient (name, gender, date_of_birth, contact_info, emergency_contact, insurance_provider_id, policy_number) VALUES
@@ -618,18 +672,16 @@ INSERT INTO Appointment (patient_id, doctor_id, branch_id, schedule_date, status
 (4, 1, 1, '2025-01-18 10:00:00', 'Cancelled', FALSE, 'Patient called to cancel.'),
 (5, 4, 2, '2025-01-19 11:00:00', 'Completed', FALSE, 'Follow-up on knee injury. Referred for physical therapy.'),
 (6, 5, 3, '2025-01-20 14:00:00', 'Completed', FALSE, 'Headache follow-up. Medication adjusted.'),
--- Future scheduled appointments (relative to 2025-10-18)
+-- Future scheduled appointments
 (1, 1, 1, '2025-10-20 10:00:00', 'Scheduled', FALSE, NULL),
 (2, 2, 1, '2025-10-21 11:00:00', 'Scheduled', FALSE, NULL),
 (3, 3, 2, '2025-10-22 09:30:00', 'Scheduled', FALSE, NULL),
 (13, 6, 3, '2025-10-23 14:00:00', 'Scheduled', FALSE, NULL),
 (14, 5, 3, '2025-10-24 15:00:00', 'Scheduled', FALSE, NULL),
 (15, 4, 2, '2025-10-25 10:00:00', 'Scheduled', FALSE, NULL),
--- An appointment to be rescheduled
 (8, 6, 3, '2025-10-26 10:00:00', 'Scheduled', FALSE, NULL);
 
 -- Insert Rescheduled Appointment Log
--- This logs the change for appointment_id 20 (Nadeeka Rajapakse)
 INSERT INTO rescheduled_appointments (previous_appointment_id, previous_date, new_date, rescheduled_by_staff_id, reschedule_reason)
 VALUES (20, '2025-10-26 10:00:00', '2025-10-28 09:00:00', 6, 'Patient request due to work conflict.');
 
@@ -640,112 +692,62 @@ SET schedule_date = '2025-10-28 09:00:00',
     reschedule_id = LAST_INSERT_ID()
 WHERE appointment_id = 20;
 
-
--- Insert Appointment Treatments (for completed appointments)
+-- Insert Appointment Treatments
 INSERT INTO Appointment_Treatment (appointment_id, service_code, notes, actual_price) VALUES
--- Appt 1 (Anura)
 (1, 'CON-001', 'Standard consultation', 80.00),
 (1, 'ECG-001', 'ECG performed due to chest pain', 200.00),
--- Appt 2 (Sanduni)
 (2, 'CON-001', 'Dermatology consultation', 80.00),
 (2, 'DERM-001', 'Allergy test administered', 250.00),
--- Appt 3 (Kasun)
 (3, 'PED-001', 'Standard wellness check', 120.00),
--- Appt 4 (Dilini)
 (4, 'CON-001', 'Follow-up consultation', 80.00),
 (4, 'LAB-002', 'Lipid profile check', 95.00),
--- Appt 5 (Ranil)
 (5, 'CON-001', 'Ortho consultation', 80.00),
 (5, 'XRAY-001', 'Right knee X-Ray', 120.00),
--- Appt 6 (Malini)
 (6, 'CON-001', 'Neurology consultation', 80.00),
 (6, 'NEUR-001', 'Initial neurological exam', 180.00),
--- Appt 7 (Chaminda)
 (7, 'CON-001', 'Emergency consultation', 80.00),
--- Appt 8 (Nadeeka)
 (8, 'CON-001', 'General consultation', 80.00),
 (8, 'LAB-001', 'Standard bloodwork', 150.50),
--- Appt 9 (Lasith)
 (9, 'PED-001', 'Pediatric check-up', 120.00),
--- Appt 10 (Amaya)
 (10, 'PED-001', 'Pediatric consultation for flu', 120.00),
--- Appt 12 (Ranil)
 (12, 'CON-001', 'Follow-up ortho consultation', 80.00),
 (12, 'ORTHO-001', 'First physical therapy session', 100.00),
--- Appt 13 (Malini)
 (13, 'CON-001', 'Neurology follow-up', 80.00);
 
-
--- Insert Invoices (using the stored procedure)
+-- Insert Invoices
 SET @inv_id = 0;
 
--- Appt 1 (Anura, Insured, Unpaid) - Total 280
 CALL CalculateInvoiceFromTreatments(1, 200.00, '2025-01-10', '2025-02-10', 0, @inv_id);
--- Appt 2 (Sanduni, Insured, Paid) - Total 330
 CALL CalculateInvoiceFromTreatments(2, 300.00, '2025-01-10', '2025-02-10', 30.00, @inv_id);
--- Appt 3 (Kasun, Insured, Unpaid) - Total 120
 CALL CalculateInvoiceFromTreatments(3, 100.00, '2025-01-11', '2025-02-11', 0, @inv_id);
--- Appt 4 (Dilini, Insured, Paid) - Total 175
 CALL CalculateInvoiceFromTreatments(4, 150.00, '2025-01-11', '2025-02-11', 25.00, @inv_id);
--- Appt 5 (Ranil, No Ins, Partially Paid) - Total 200
 CALL CalculateInvoiceFromTreatments(5, 0.00, '2025-01-12', '2025-02-12', 100.00, @inv_id);
--- Appt 6 (Malini, Insured, Unpaid) - Total 260
 CALL CalculateInvoiceFromTreatments(6, 200.00, '2025-01-13', '2025-02-13', 0, @inv_id);
--- Appt 7 (Chaminda, Insured, Paid) - Total 80
 CALL CalculateInvoiceFromTreatments(7, 50.00, '2025-01-14', '2025-02-14', 30.00, @inv_id);
--- Appt 8 (Nadeeka, No Ins, Unpaid) - Total 230.50
 CALL CalculateInvoiceFromTreatments(8, 0.00, '2025-01-15', '2025-02-15', 0, @inv_id);
--- Appt 9 (Lasith, Insured, Paid) - Total 120
 CALL CalculateInvoiceFromTreatments(9, 100.00, '2025-01-16', '2025-02-16', 20.00, @inv_id);
--- Appt 10 (Amaya, Insured, Unpaid) - Total 120
 CALL CalculateInvoiceFromTreatments(10, 100.00, '2025-01-17', '2025-02-17', 0, @inv_id);
--- Appt 12 (Ranil, No Ins, Unpaid) - Total 180
 CALL CalculateInvoiceFromTreatments(12, 0.00, '2025-01-19', '2025-02-19', 0, @inv_id);
--- Appt 13 (Malini, Insured, Unpaid) - Total 80
 CALL CalculateInvoiceFromTreatments(13, 50.00, '2025-01-20', '2025-02-20', 0, @inv_id);
 
-
--- Insert Payments (subsequent payments, triggers will update invoice status)
--- Invoice 1 (Anura) - Due 80. Pays in full.
-INSERT INTO Payment (invoice_id, paid_amount, payment_date, method_of_payment, status)
-VALUES (1, 80.00, '2025-02-05 10:00:00', 'Credit Card', 'Completed');
-
--- Invoice 3 (Kasun) - Due 20. Pays in full.
-INSERT INTO Payment (invoice_id, paid_amount, payment_date, method_of_payment, status)
-VALUES (3, 20.00, '2025-02-11 14:00:00', 'Credit Card', 'Completed');
-
--- Invoice 5 (Ranil) - Due 100. Pays 50. (Will remain 'Partially Paid')
-INSERT INTO Payment (invoice_id, paid_amount, payment_date, method_of_payment, status)
-VALUES (5, 50.00, '2025-02-10 11:00:00', 'Cash', 'Completed');
-
--- Invoice 6 (Malini) - Due 60. Pays in full.
-INSERT INTO Payment (invoice_id, paid_amount, payment_date, method_of_payment, status)
-VALUES (6, 60.00, '2025-02-11 12:00:00', 'Bank Transfer', 'Completed');
-
--- Invoice 10 (Amaya) - Due 20. Pays in full.
-INSERT INTO Payment (invoice_id, paid_amount, payment_date, method_of_payment, status)
-VALUES (10, 20.00, '2025-02-15 15:00:00', 'Cash', 'Completed');
-
+-- Insert Payments
+INSERT INTO Payment (invoice_id, paid_amount, payment_date, method_of_payment, status) VALUES
+(1, 80.00, '2025-02-05 10:00:00', 'Credit Card', 'Completed'),
+(3, 20.00, '2025-02-11 14:00:00', 'Credit Card', 'Completed'),
+(5, 50.00, '2025-02-10 11:00:00', 'Cash', 'Completed'),
+(6, 60.00, '2025-02-11 12:00:00', 'Bank Transfer', 'Completed'),
+(10, 20.00, '2025-02-15 15:00:00', 'Cash', 'Completed');
 
 -- Insert Insurance Claims
 INSERT INTO Insurance_Claim (invoice_id, insurance_provider_id, claimed_amount, claim_status) VALUES
--- Appt 1 (Anura, Ins ID 1)
 (1, 1, 200.00, 'Approved'),
--- Appt 2 (Sanduni, Ins ID 2)
 (2, 2, 300.00, 'Approved'),
--- Appt 3 (Kasun, Ins ID 3)
 (3, 3, 100.00, 'Approved'),
--- Appt 4 (Dilini, Ins ID 1)
 (4, 1, 150.00, 'Approved'),
--- Appt 6 (Malini, Ins ID 4)
 (6, 4, 200.00, 'Pending'),
--- Appt 7 (Chaminda, Ins ID 2)
 (7, 2, 50.00, 'Rejected'),
--- Appt 9 (Lasith, Ins ID 1)
 (9, 1, 100.00, 'Approved'),
--- Appt 10 (Amaya, Ins ID 2)
 (10, 2, 100.00, 'Pending'),
--- Appt 13 (Malini, Ins ID 4)
 (12, 4, 50.00, 'Approved');
 
 -- ============================================
@@ -753,4 +755,3 @@ INSERT INTO Insurance_Claim (invoice_id, insurance_provider_id, claimed_amount, 
 -- ============================================
 
 COMMIT;
-

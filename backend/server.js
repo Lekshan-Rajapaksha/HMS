@@ -792,16 +792,52 @@ app.get("/api/doctors/:id/availability", authorize(['receptionist', 'patient']),
         const { date } = req.query;
         if (!date) return res.status(400).json({ message: "A date query parameter is required." });
 
-        const startTime = 9, endTime = 17, slotDurationMinutes = 30;
-        const [bookedAppointments] = await pool.query(`SELECT TIME(schedule_date) as booked_time FROM Appointment WHERE doctor_id = ? AND DATE(schedule_date) = ? AND status IN ('Scheduled', 'Rescheduled')`, [id, date]);
+        const appointmentDate = new Date(date);
+        const dayOfWeek = appointmentDate.getDay();
+        const slotDurationMinutes = 30;
+
+        const [doctorAvailabilitySlots] = await pool.query(
+            `SELECT start_time, end_time FROM doctor_availability
+             WHERE doctor_id = ? AND day_of_week = ? AND is_available = 1
+             ORDER BY start_time`,
+            [id, dayOfWeek]
+        );
+
+        if (doctorAvailabilitySlots.length === 0) {
+            return res.json([]);
+        }
+
+        const [bookedAppointments] = await pool.query(
+            `SELECT TIME(schedule_date) as booked_time FROM Appointment
+             WHERE doctor_id = ? AND DATE(schedule_date) = ? AND status IN ('Scheduled', 'Rescheduled')`,
+            [id, date]
+        );
         const bookedSlots = new Set(bookedAppointments.map(appt => appt.booked_time));
         const availableSlots = [];
-        for (let h = startTime; h < endTime; h++) {
-            for (let m = 0; m < 60; m += slotDurationMinutes) {
-                const timeSlot = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00`;
-                if (!bookedSlots.has(timeSlot)) availableSlots.push(timeSlot.substring(0, 5));
+
+        for (const slot of doctorAvailabilitySlots) {
+            const startHour = parseInt(slot.start_time.substring(0, 2));
+            const startMin = parseInt(slot.start_time.substring(3, 5));
+            const endHour = parseInt(slot.end_time.substring(0, 2));
+            const endMin = parseInt(slot.end_time.substring(3, 5));
+
+            let currentHour = startHour;
+            let currentMin = startMin;
+
+            while (currentHour < endHour || (currentHour === endHour && currentMin < endMin)) {
+                const timeSlot = `${String(currentHour).padStart(2, '0')}:${String(currentMin).padStart(2, '0')}:00`;
+                if (!bookedSlots.has(timeSlot)) {
+                    availableSlots.push(timeSlot.substring(0, 5));
+                }
+
+                currentMin += slotDurationMinutes;
+                if (currentMin >= 60) {
+                    currentHour += 1;
+                    currentMin = 0;
+                }
             }
         }
+
         res.json(availableSlots);
     } catch (err) { handleDatabaseError(res, err); }
 });
@@ -1438,7 +1474,27 @@ app.post("/api/patient/book-appointment", authorize(['patient']), async (req, re
         }
         // --- END CHECK 2 ---
 
-        // Proceed with the insert if both checks pass
+        // --- START Check 3: Doctor Availability ---
+        const appointmentDate = new Date(scheduleDateTime);
+        const dayOfWeek = appointmentDate.getDay();
+        const appointmentTime = appointmentDate.getHours().toString().padStart(2, '0') + ':' + appointmentDate.getMinutes().toString().padStart(2, '0');
+
+        const [doctorAvailability] = await pool.query(
+            `SELECT availability_id FROM doctor_availability
+             WHERE doctor_id = ?
+             AND day_of_week = ?
+             AND is_available = 1
+             AND start_time <= ?
+             AND end_time > ?`,
+            [doctorId, dayOfWeek, appointmentTime, appointmentTime]
+        );
+
+        if (doctorAvailability.length === 0) {
+            return res.status(409).json({ message: "The doctor is not available at this time. Please select a different time slot." });
+        }
+        // --- END CHECK 3 ---
+
+        // Proceed with the insert if all checks pass
         await pool.query(
             "INSERT INTO Appointment (patient_id, doctor_id, branch_id, schedule_date, status) VALUES (?, ?, ?, ?, 'Scheduled')",
             [patientId, doctorId, branchId, scheduleDateTime]
@@ -1453,6 +1509,67 @@ app.post("/api/patient/book-appointment", authorize(['patient']), async (req, re
         }
         handleDatabaseError(res, err);
     }
+});
+
+// --- DOCTOR AVAILABILITY ENDPOINTS ---
+app.get("/api/doctor/availability", authorize(['doctor']), getDoctorInfoFromToken, async (req, res) => {
+    try {
+        const [rows] = await pool.query(`
+            SELECT availability_id, day_of_week, start_time, end_time, is_available
+            FROM doctor_availability
+            WHERE doctor_id = ?
+            ORDER BY day_of_week, start_time
+        `, [req.doctorId]);
+        res.json(rows);
+    } catch (err) { handleDatabaseError(res, err); }
+});
+
+app.post("/api/doctor/availability", authorize(['doctor']), getDoctorInfoFromToken, async (req, res) => {
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
+        const { availabilitySlots } = req.body;
+
+        if (!Array.isArray(availabilitySlots) || availabilitySlots.length === 0) {
+            await connection.rollback();
+            return res.status(400).json({ message: "availability slots required" });
+        }
+
+        await connection.query("DELETE FROM doctor_availability WHERE doctor_id = ?", [req.doctorId]);
+
+        for (const slot of availabilitySlots) {
+            const { dayOfWeek, startTime, endTime, isAvailable } = slot;
+            await connection.query(
+                "INSERT INTO doctor_availability (doctor_id, day_of_week, start_time, end_time, is_available) VALUES (?, ?, ?, ?, ?)",
+                [req.doctorId, dayOfWeek, startTime, endTime, isAvailable]
+            );
+        }
+
+        await connection.commit();
+        res.json({ message: "Availability updated successfully" });
+    } catch (err) {
+        await connection.rollback();
+        handleDatabaseError(res, err);
+    } finally {
+        connection.release();
+    }
+});
+
+app.delete("/api/doctor/availability/:availabilityId", authorize(['doctor']), getDoctorInfoFromToken, async (req, res) => {
+    try {
+        const { availabilityId } = req.params;
+        const [[slot]] = await pool.query(
+            "SELECT doctor_id FROM doctor_availability WHERE availability_id = ?",
+            [availabilityId]
+        );
+
+        if (!slot || slot.doctor_id !== req.doctorId) {
+            return res.status(403).json({ message: "Forbidden: You can only delete your own availability" });
+        }
+
+        await pool.query("DELETE FROM doctor_availability WHERE availability_id = ?", [availabilityId]);
+        res.status(204).send();
+    } catch (err) { handleDatabaseError(res, err); }
 });
 
 // KEEP THIS BLOCK AT THE END OF YOUR FILE
