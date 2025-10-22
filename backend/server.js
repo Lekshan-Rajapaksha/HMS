@@ -1102,6 +1102,7 @@ app.get("/api/patient/my-documents", authorize(['patient']), async (req, res) =>
     }
 });
 
+// --- NEW: Book an Appointment (for Patients) ---
 app.post("/api/patient/book-appointment", authorize(['patient']), async (req, res) => {
     const { patientId } = req.user;
     const { doctorId, branchId, scheduleDateTime } = req.body;
@@ -1111,6 +1112,23 @@ app.post("/api/patient/book-appointment", authorize(['patient']), async (req, re
     }
 
     try {
+        // --- START NEW VALIDATION CHECK ---
+        const [[{ count }]] = await pool.query(
+            `SELECT COUNT(*) as count FROM Appointment 
+             WHERE patient_id = ? 
+             AND DATE(schedule_date) = DATE(?) 
+             AND status IN ('Scheduled', 'Rescheduled')`,
+            [patientId, scheduleDateTime]
+        );
+
+        if (count > 0) {
+            // If count is > 0, block the booking
+            return res.status(409).json({ message: "You already have an appointment booked for this day." });
+        }
+        // --- END NEW VALIDATION CHECK ---
+
+
+        // If check passes, proceed with the original insert
         await pool.query(
             "INSERT INTO Appointment (patient_id, doctor_id, branch_id, schedule_date, status) VALUES (?, ?, ?, ?, 'Scheduled')",
             [patientId, doctorId, branchId, scheduleDateTime]
@@ -1119,11 +1137,9 @@ app.post("/api/patient/book-appointment", authorize(['patient']), async (req, re
         res.status(201).json({ message: "Appointment booked successfully." });
 
     } catch (err) {
-        // This handles the "PreventOverlappingAppointments" trigger in your database
         if (err.sqlState === '45000') {
             return res.status(409).json({ message: "This time slot is no longer available. Please select another time." });
         }
-        // Handle other errors
         handleDatabaseError(res, err);
     }
 });
