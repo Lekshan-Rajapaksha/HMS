@@ -1102,6 +1102,32 @@ app.get("/api/patient/my-documents", authorize(['patient']), async (req, res) =>
     }
 });
 
+app.post("/api/patient/book-appointment", authorize(['patient']), async (req, res) => {
+    const { patientId } = req.user;
+    const { doctorId, branchId, scheduleDateTime } = req.body;
+
+    if (!doctorId || !branchId || !scheduleDateTime) {
+        return res.status(400).json({ message: "Doctor, branch, and schedule date are required." });
+    }
+
+    try {
+        await pool.query(
+            "INSERT INTO Appointment (patient_id, doctor_id, branch_id, schedule_date, status) VALUES (?, ?, ?, ?, 'Scheduled')",
+            [patientId, doctorId, branchId, scheduleDateTime]
+        );
+
+        res.status(201).json({ message: "Appointment booked successfully." });
+
+    } catch (err) {
+        // This handles the "PreventOverlappingAppointments" trigger in your database
+        if (err.sqlState === '45000') {
+            return res.status(409).json({ message: "This time slot is no longer available. Please select another time." });
+        }
+        // Handle other errors
+        handleDatabaseError(res, err);
+    }
+});
+
 // KEEP THIS BLOCK AT THE END OF YOUR FILE
 app.listen(PORT, host, () => {
     console.log(`🚀 Server is running on ${host}:${PORT}`);
