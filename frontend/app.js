@@ -429,62 +429,63 @@ const openStaffForm = async (id = null) => {
     // In app.js, inside openStaffForm
 // REPLACE the entire form.onsubmit = e => { ... }; block with this:
 
-form.onsubmit = e => {
-    e.preventDefault();
-    const formData = new FormData(form);
-    const data = {}; // Start with an empty object
+// --- Handle form submission ---
+    form.onsubmit = e => {
+        e.preventDefault();
+        const formData = new FormData(form);
+        const data = {}; // Start with an empty object
 
-    // Manually iterate through FormData entries
-    formData.forEach((value, key) => {
-        // IMPORTANT: Skip the specialty checkboxes here, we handle them separately
-        if (key === 'specialty_ids[]') {
-            return;
-        }
-
-        // Handle other fields normally
-        // Check if the key already exists (might happen with multiple selects, etc.)
-        if (data.hasOwnProperty(key)) {
-            // If it exists and isn't an array, make it an array
-            if (!Array.isArray(data[key])) {
-                data[key] = [data[key]];
+        // Manually iterate through FormData entries
+        formData.forEach((value, key) => {
+            // IMPORTANT: Skip the specialty checkboxes here, we handle them separately
+            if (key === 'specialty_ids[]') {
+                return;
             }
-            data[key].push(value);
-        } else {
-            data[key] = value; // Assign the value directly
+
+            // Handle other fields normally
+            if (data.hasOwnProperty(key)) {
+                if (!Array.isArray(data[key])) {
+                    data[key] = [data[key]];
+                }
+                data[key].push(value);
+            } else {
+                data[key] = value; // Assign the value directly
+            }
+        });
+
+        // --- Manually collect checked specialty IDs ---
+        const selectedSpecialtyIds = [];
+        const specialtyCheckboxes = form.querySelectorAll('.specialty-checkbox:checked');
+        specialtyCheckboxes.forEach(checkbox => {
+            selectedSpecialtyIds.push(checkbox.value); // Collect values
+        });
+
+        // Add the array ONLY if the role is doctor
+        const selectedRoleText = roleSelect.options[roleSelect.selectedIndex]?.text.toLowerCase();
+        if (selectedRoleText === 'doctor') {
+            data.specialty_ids = selectedSpecialtyIds; // Add the array (it's okay if it's empty)
         }
-    });
+        // -------------------------------------------
 
-    // --- Manually collect checked specialty IDs ---
-    const selectedSpecialtyIds = [];
-    const specialtyCheckboxes = form.querySelectorAll('.specialty-checkbox:checked');
-    specialtyCheckboxes.forEach(checkbox => {
-        selectedSpecialtyIds.push(checkbox.value); // Collect values
-    });
-    // Add the array ONLY if the role is doctor
-    const selectedRoleText = roleSelect.options[roleSelect.selectedIndex]?.text.toLowerCase();
-    if (selectedRoleText === 'doctor') {
-        // Add the array (even if empty, assuming backend handles it)
-        data.specialty_ids = selectedSpecialtyIds;
-    }
-    // -------------------------------------------
+        // On edit, if password field is empty, don't send it
+        if (isEditing && !data.password) {
+            delete data.password;
+        }
 
-    // On edit, if password field is empty, don't send it
-    if (isEditing && !data.password) {
-        delete data.password;
-    }
+        // Handle checkbox 'is_medical_staff'
+        data.is_medical_staff = formData.has('is_medical_staff') ? '1' : '0';
 
-    // Handle checkbox 'is_medical_staff'
-    data.is_medical_staff = formData.has('is_medical_staff') ? '1' : '0';
+        // Determine the correct refresh function
+        const refreshFunction = (typeof userProfile !== 'undefined' && userProfile.branch_id) ? loadStaffPage : loadStaffPage;
 
-    // Submit the manually constructed data object
-    submitForm(
-        isEditing ? `/api/staff/${id}` : "/api/staff",
-        isEditing ? "PUT" : "POST",
-        data, // Use the manually built object
-        loadStaffPage
-    );
-};
-};
+        // Submit the manually constructed data object
+        submitForm(
+            isEditing ? `/api/staff/${id}` : "/api/staff",
+            isEditing ? "PUT" : "POST",
+            data, // Use the manually built object
+            refreshFunction
+        );
+    };
     const openSimpleForm = async (type, id = null) => {
         const isEditing = id !== null;
         const data = isEditing ? await authorizedFetch(`/api/${type}s/${id}`) : {};

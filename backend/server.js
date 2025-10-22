@@ -361,24 +361,20 @@ app.post("/api/staff", authorize(['admin', 'branch manager']), async (req, res) 
         // Check if the role is 'Doctor'
         const [[roleCheck]] = await connection.query("SELECT name FROM Role WHERE role_id = ?", [role_id]);
         if (roleCheck && roleCheck.name.toLowerCase() === 'doctor') {
-            // Validate specialty_ids
-            if (!Array.isArray(specialty_ids) || specialty_ids.length === 0) {
-                 await connection.rollback(); // Rollback before throwing error
-                 connection.release();
-                 return res.status(400).json({ message: "At least one specialty is required to create a new doctor." });
-            }
-
             // Create Doctor record
             const [doctorResult] = await connection.query("INSERT INTO Doctor (staff_id) VALUES (?)", [newStaffId]);
             const newDoctorId = doctorResult.insertId;
 
-            // --- Insert MULTIPLE specialties ---
-            const specialtyValues = specialty_ids.map(specId => [newDoctorId, parseInt(specId)]); // Ensure IDs are integers
-            if (specialtyValues.length > 0) {
-                await connection.query(
-                    "INSERT INTO doctor_specialties (doctor_id, specialty_id) VALUES ?",
-                    [specialtyValues] // Use bulk insert syntax
-                );
+            // --- Insert MULTIPLE specialties (if any exist) ---
+            // This now checks if the array exists and has items
+            if (Array.isArray(specialty_ids) && specialty_ids.length > 0) {
+                const specialtyValues = specialty_ids.map(specId => [newDoctorId, parseInt(specId)]);
+                if (specialtyValues.length > 0) {
+                    await connection.query(
+                        "INSERT INTO doctor_specialties (doctor_id, specialty_id) VALUES ?",
+                        [specialtyValues]
+                    );
+                }
             }
             // ---------------------------------
         }
@@ -493,13 +489,6 @@ app.put("/api/staff/:id", authorize(['admin']), async (req, res) => {
 
         // Scenario A: Role changed TO Doctor OR remains Doctor
         if (newRoleIsDoctor) {
-            // Validate specialties if becoming/staying a doctor
-            if (!Array.isArray(specialty_ids) || specialty_ids.length === 0) {
-                await connection.rollback();
-                connection.release();
-                return res.status(400).json({ message: "At least one specialty is required for a doctor role." });
-            }
-
             // If they weren't a doctor before, create the Doctor record
             if (!currentRoleIsDoctor) {
                 const [docResult] = await connection.query("INSERT INTO Doctor (staff_id) VALUES (?)", [staffId]);
@@ -509,13 +498,15 @@ app.put("/api/staff/:id", authorize(['admin']), async (req, res) => {
             // Clear existing specialties for this doctor
             await connection.query("DELETE FROM doctor_specialties WHERE doctor_id = ?", [doctorIdToUpdate]);
 
-            // Insert new specialties
-            const specialtyValues = specialty_ids.map(specId => [doctorIdToUpdate, parseInt(specId)]);
-            if (specialtyValues.length > 0) {
-                await connection.query(
-                    "INSERT INTO doctor_specialties (doctor_id, specialty_id) VALUES ?",
-                    [specialtyValues]
-                );
+            // Insert new specialties (if any exist)
+            if (Array.isArray(specialty_ids) && specialty_ids.length > 0) {
+                const specialtyValues = specialty_ids.map(specId => [doctorIdToUpdate, parseInt(specId)]);
+                if (specialtyValues.length > 0) {
+                    await connection.query(
+                        "INSERT INTO doctor_specialties (doctor_id, specialty_id) VALUES ?",
+                        [specialtyValues]
+                    );
+                }
             }
         }
         // Scenario B: Role changed FROM Doctor to something else

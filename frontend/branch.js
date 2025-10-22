@@ -318,10 +318,29 @@ const openStaffForm = async (id = null) => {
     toggleSpecialty(); // Run on form load to set initial state
 
     // --- Handle form submission ---
+    // --- Handle form submission ---
     form.onsubmit = e => {
         e.preventDefault();
         const formData = new FormData(form);
-        const data = Object.fromEntries(formData.entries()); // Basic key-value pairs
+        const data = {}; // Start with an empty object
+
+        // Manually iterate through FormData entries
+        formData.forEach((value, key) => {
+            // IMPORTANT: Skip the specialty checkboxes here, we handle them separately
+            if (key === 'specialty_ids[]') {
+                return;
+            }
+
+            // Handle other fields normally
+            if (data.hasOwnProperty(key)) {
+                if (!Array.isArray(data[key])) {
+                    data[key] = [data[key]];
+                }
+                data[key].push(value);
+            } else {
+                data[key] = value; // Assign the value directly
+            }
+        });
 
         // --- Manually collect checked specialty IDs ---
         const selectedSpecialtyIds = [];
@@ -329,28 +348,13 @@ const openStaffForm = async (id = null) => {
         specialtyCheckboxes.forEach(checkbox => {
             selectedSpecialtyIds.push(checkbox.value); // Collect values
         });
-        // Add the array to the data payload (use the key your backend expects, e.g., "specialty_ids")
-        data.specialty_ids = selectedSpecialtyIds;
-        // Clean up the placeholder key if FormData created it
-        delete data['specialty_ids[]'];
-        // -------------------------------------------
 
-
-        // If the role is not 'Doctor', remove the specialty_ids
+        // Add the array ONLY if the role is doctor
         const selectedRoleText = roleSelect.options[roleSelect.selectedIndex]?.text.toLowerCase();
-        if (selectedRoleText !== 'doctor') {
-            delete data.specialty_ids;
-        } else {
-             // If it IS a doctor but NO specialties selected, send empty array if backend needs it
-             // Or delete if backend handles absence correctly
-             if (!data.specialty_ids || data.specialty_ids.length === 0) {
-                 // Option 1: Send empty array
-                  data.specialty_ids = [];
-                 // Option 2: Delete the key (choose based on backend)
-                 // delete data.specialty_ids;
-             }
+        if (selectedRoleText === 'doctor') {
+            data.specialty_ids = selectedSpecialtyIds; // Add the array (it's okay if it's empty)
         }
-
+        // -------------------------------------------
 
         // On edit, if password field is empty, don't send it
         if (isEditing && !data.password) {
@@ -360,18 +364,17 @@ const openStaffForm = async (id = null) => {
         // Handle checkbox 'is_medical_staff'
         data.is_medical_staff = formData.has('is_medical_staff') ? '1' : '0';
 
-        // Determine correct refresh function based on context (Admin vs Branch Manager)
-        const refreshFunction = (typeof userProfile !== 'undefined' && userProfile.branch_id) ? loadStaffPage : loadStaffPage; // Assuming loadStaffPage works for both, adjust if needed
+        // Determine the correct refresh function
+        const refreshFunction = (typeof userProfile !== 'undefined' && userProfile.branch_id) ? loadStaffPage : loadStaffPage;
 
-
+        // Submit the manually constructed data object
         submitForm(
             isEditing ? `/api/staff/${id}` : "/api/staff",
             isEditing ? "PUT" : "POST",
-            data,
-            refreshFunction // Use determined refresh function
+            data, // Use the manually built object
+            refreshFunction
         );
     };
-};
 
     const openPaymentForm = async (invoiceId) => {
         formModalLabel.textContent = `Record Payment for Invoice #${invoiceId}`;
