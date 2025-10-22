@@ -1,10 +1,74 @@
-// doctor-appointments.js
+// doctor-portal-combined.js
+
+// --- CONFIGURATION & GLOBAL SETUP (Centralized and Defined Once) ---
 const API_BASE_URL = "https://hms-production-a5ad.up.railway.app";
 const authToken = localStorage.getItem('clinicProToken');
-if (!authToken) window.location.href = '/login.html';
+
+// Global authentication check
+if (!authToken) {
+    window.location.href = '/login.html';
+}
+
+// --- GLOBAL STATE ---
+let currentAppointments = [];
+let treatmentCatalogue = [];
+let prescribedTreatments = [];
+let selectedAppointment = null;
+let currentAvailability = {}; // For availability tab
+
+// --- AVAILABILITY CONFIGURATION ---
+const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const defaultStartTime = '09:00';
+const defaultEndTime = '17:00';
+
+// --- HELPER FUNCTIONS (Based on doctor-appointments.js implementation) ---
+
+// NOTE: This showToast uses the toastContainer defined inside DOMContentLoaded, 
+// so it must be placed inside the main block or the variable must be globally scoped.
+// To keep it clean, we'll redefine it inside the DOMContentLoaded block where it has access to elements.
+
+const authorizedFetch = async (endpoint, options = {}) => {
+    const defaultOptions = {
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${authToken}`
+        }
+    };
+    const mergedOptions = {
+        ...defaultOptions,
+        ...options,
+        headers: { ...defaultOptions.headers, ...options.headers }
+    };
+
+    try {
+        const response = await fetch(`${API_BASE_URL}${endpoint}`, mergedOptions);
+
+        if ([401, 403].includes(response.status)) {
+            localStorage.removeItem('clinicProToken');
+            window.location.href = '/login.html';
+            return null;
+        }
+
+        if (!response.ok) {
+            // Error handling from appointments script (more detailed)
+            const err = await response.json();
+            throw new Error(err.message || `HTTP error! status: ${response.status}`);
+        }
+
+        return response.status === 204 ? null : response.json();
+    } catch (error) {
+        console.error("Fetch error:", error);
+        // showToast is defined inside DOMContentLoaded, so error logging here is sufficient.
+        return null;
+    }
+};
+
+// --- MAIN DOCUMENT READY BLOCK ---
 
 document.addEventListener("DOMContentLoaded", () => {
-    // Element & Modal Selection
+    console.log('[PORTAL] Combined Script initialized');
+
+    // --- ELEMENT SELECTION (Combined from both files) ---
     const appointmentListContainer = document.getElementById("appointment-list-container");
     const patientInfoContainer = document.getElementById("patient-info-container");
     const toastContainer = document.querySelector(".toast-container");
@@ -13,14 +77,18 @@ document.addEventListener("DOMContentLoaded", () => {
     const completionModal = new bootstrap.Modal(document.getElementById("completionModal"));
     const completionForm = document.getElementById("completion-form");
 
-    // State
-    let currentAppointments = [];
-    let treatmentCatalogue = [];
-    let prescribedTreatments = [];
-    let selectedAppointment = null;
+    // Elements for Tab Switching & Availability
+    const appointmentsTab = document.getElementById('appointments-tab');
+    const availabilityTab = document.getElementById('availability-tab');
+    const tabLinks = document.querySelectorAll('.nav-tab-link');
+    const availabilityGrid = document.getElementById('availability-grid');
+    const saveBtn = document.getElementById('save-availability-btn');
+    const resetBtn = document.getElementById('reset-availability-btn');
 
-    // --- HELPER FUNCTIONS ---
+    // --- HELPER FUNCTION (Redefined inside scope to access toastContainer) ---
     const showToast = (message, type = 'success') => {
+        if (!toastContainer) return;
+
         const toastId = `toast-${Date.now()}`;
         const icon = type === 'success' ? 'check-circle-fill' : 'exclamation-triangle-fill';
         toastContainer.insertAdjacentHTML('beforeend', `
@@ -39,7 +107,9 @@ document.addEventListener("DOMContentLoaded", () => {
         toastEl.addEventListener('hidden.bs.toast', () => toastEl.remove());
     };
 
-    const authorizedFetch = async (endpoint, options = {}) => {
+    // Re-writing a simpler authorizedFetch for the local scope:
+    const localShowToast = showToast;
+    const localAuthorizedFetch = async (endpoint, options = {}) => {
         const defaultOptions = {
             headers: {
                 'Content-Type': 'application/json',
@@ -69,12 +139,14 @@ document.addEventListener("DOMContentLoaded", () => {
             return response.status === 204 ? null : response.json();
         } catch (error) {
             console.error("Fetch error:", error);
-            showToast(error.message, 'danger');
+            localShowToast(error.message, 'danger'); // Now uses local showToast
             return null;
         }
     };
 
-    // --- RENDER FUNCTIONS ---
+
+    // --- APPOINTMENTS LOGIC (Functions from doctor-appointments.js) ---
+
     const renderSpinner = container => {
         if (container) {
             container.innerHTML = `
@@ -330,13 +402,13 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     };
 
-    // --- DATA LOADERS & LOGIC ---
+    // DATA LOADERS & LOGIC
     const loadAppointments = async (filter) => {
         renderSpinner(appointmentListContainer);
         renderInitialPatientView();
         selectedAppointment = null;
 
-        const appointments = await authorizedFetch(`/api/doctor/appointments/${filter}`);
+        const appointments = await localAuthorizedFetch(`/api/doctor/appointments/${filter}`);
         currentAppointments = appointments || [];
         renderAppointments(currentAppointments);
     };
@@ -350,16 +422,16 @@ document.addEventListener("DOMContentLoaded", () => {
         if (startDate) params.append('startDate', startDate);
         if (endDate) params.append('endDate', endDate);
 
-        const appointments = await authorizedFetch(`/api/doctor/appointments/search?${params.toString()}`);
+        const appointments = await localAuthorizedFetch(`/api/doctor/appointments/search?${params.toString()}`);
         currentAppointments = appointments || [];
         renderAppointments(currentAppointments);
     };
 
     const loadInitialData = async () => {
         const [profile, stats, treatments] = await Promise.all([
-            authorizedFetch('/api/doctor/profile'),
-            authorizedFetch('/api/doctor/stats'),
-            authorizedFetch('/api/list/treatments')
+            localAuthorizedFetch('/api/doctor/profile'),
+            localAuthorizedFetch('/api/doctor/stats'),
+            localAuthorizedFetch('/api/list/treatments')
         ]);
 
         if (profile) {
@@ -389,9 +461,170 @@ document.addEventListener("DOMContentLoaded", () => {
         loadAppointments('today');
     };
 
-    // --- EVENT LISTENERS ---
+    // --- AVAILABILITY LOGIC (Functions from doctor-availability.js) ---
 
-    // Filter buttons
+    // RENDER FUNCTIONS
+    const renderAvailabilityGrid = () => {
+        let html = '';
+
+        for (let dayOfWeek = 0; dayOfWeek < 7; dayOfWeek++) {
+            const dayName = days[dayOfWeek];
+            const availability = currentAvailability[dayOfWeek] || {
+                dayOfWeek,
+                startTime: defaultStartTime,
+                endTime: defaultEndTime,
+                isAvailable: true
+            };
+
+            html += `
+                <div class="day-availability">
+                    <h6>
+                        <input type="checkbox" 
+                               class="day-checkbox" 
+                               data-day="${dayOfWeek}" 
+                               ${availability.isAvailable ? 'checked' : ''}>
+                        <label class="mb-0">${dayName}</label>
+                    </h6>
+                    <div class="time-inputs">
+                        <input type="time" 
+                               class="start-time" 
+                               data-day="${dayOfWeek}" 
+                               value="${availability.startTime}"
+                               ${!availability.isAvailable ? 'disabled' : ''}>
+                        <span>to</span>
+                        <input type="time" 
+                               class="end-time" 
+                               data-day="${dayOfWeek}" 
+                               value="${availability.endTime}"
+                               ${!availability.isAvailable ? 'disabled' : ''}>
+                    </div>
+                </div>
+            `;
+        }
+
+        availabilityGrid.innerHTML = html;
+        attachAvailabilityEventListeners();
+    };
+
+    const attachAvailabilityEventListeners = () => {
+        document.querySelectorAll('.day-checkbox').forEach(checkbox => {
+            checkbox.addEventListener('change', (e) => {
+                const dayOfWeek = parseInt(e.target.dataset.day);
+                const startInput = document.querySelector(`.start-time[data-day="${dayOfWeek}"]`);
+                const endInput = document.querySelector(`.end-time[data-day="${dayOfWeek}"]`);
+
+                if (e.target.checked) {
+                    startInput.disabled = false;
+                    endInput.disabled = false;
+                    currentAvailability[dayOfWeek].isAvailable = true;
+                } else {
+                    startInput.disabled = true;
+                    endInput.disabled = true;
+                    currentAvailability[dayOfWeek].isAvailable = false;
+                }
+            });
+        });
+
+        document.querySelectorAll('.start-time, .end-time').forEach(input => {
+            input.addEventListener('change', (e) => {
+                const dayOfWeek = parseInt(e.target.dataset.day);
+                const isStart = e.target.classList.contains('start-time');
+
+                if (isStart) {
+                    currentAvailability[dayOfWeek].startTime = e.target.value;
+                } else {
+                    currentAvailability[dayOfWeek].endTime = e.target.value;
+                }
+            });
+        });
+    };
+
+    // TAB SWITCHING (Crucial for fixing the original issue)
+    const switchTab = (tabName) => {
+        // Update tab link styling
+        tabLinks.forEach(link => {
+            const linkTab = link.getAttribute('data-tab');
+            if (linkTab === tabName) {
+                link.classList.add('active');
+            } else {
+                link.classList.remove('active');
+            }
+        });
+
+        // Update tab content visibility
+        if (tabName === 'appointments') {
+            appointmentsTab.classList.add('active');
+            appointmentsTab.style.display = 'block';
+            availabilityTab.classList.remove('active');
+            availabilityTab.style.display = 'none';
+        } else if (tabName === 'availability') {
+            appointmentsTab.classList.remove('active');
+            appointmentsTab.style.display = 'none';
+            availabilityTab.classList.add('active');
+            availabilityTab.style.display = 'block';
+            loadAvailability(); // Loads data when switching to the tab
+        }
+    };
+
+    // DATA LOADERS
+    const loadAvailability = async () => {
+        const availability = await localAuthorizedFetch('/api/doctor/availability');
+
+        // Initialize with defaults
+        currentAvailability = {};
+        for (let dayOfWeek = 0; dayOfWeek < 7; dayOfWeek++) {
+            currentAvailability[dayOfWeek] = {
+                dayOfWeek,
+                startTime: defaultStartTime,
+                endTime: defaultEndTime,
+                isAvailable: true
+            };
+        }
+
+        // Override with database values if available
+        if (availability && Array.isArray(availability)) {
+            availability.forEach(slot => {
+                const startTime = slot.start_time.substring(0, 5);
+                const endTime = slot.end_time.substring(0, 5);
+                currentAvailability[slot.day_of_week] = {
+                    dayOfWeek: slot.day_of_week,
+                    startTime: startTime,
+                    endTime: endTime,
+                    isAvailable: slot.is_available
+                };
+            });
+        }
+
+        renderAvailabilityGrid();
+    };
+
+    const saveAvailability = async () => {
+        const availabilitySlots = Object.values(currentAvailability);
+
+        const result = await localAuthorizedFetch('/api/doctor/availability', {
+            method: 'POST',
+            body: JSON.stringify({ availabilitySlots })
+        });
+
+        if (result) {
+            showToast('Availability saved successfully!', 'success');
+        }
+    };
+
+
+    // --- EVENT LISTENERS (Combined from both files) ---
+
+    // Tab switching event listeners (from doctor-availability.js)
+    tabLinks.forEach((link) => {
+        const tabName = link.getAttribute('data-tab');
+        link.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            switchTab(tabName);
+        });
+    });
+
+    // Filter buttons (from doctor-appointments.js)
     document.querySelector('.btn-group').addEventListener('change', e => {
         const container = document.getElementById('date-range-container');
 
@@ -473,7 +706,7 @@ document.addEventListener("DOMContentLoaded", () => {
             renderSpinner(historyModalBody);
             historyModal.show();
 
-            const history = await authorizedFetch(
+            const history = await localAuthorizedFetch(
                 `/api/doctor/patients/${selectedAppointment.patient_id}/history`
             );
             renderHistoryModal(history, selectedAppointment.patient_name);
@@ -515,7 +748,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         const option = select.options[select.selectedIndex];
-        const treatmentName = option.text.split(' ($')[0];
+        const treatmentName = option.text.split(' (Rs')[0];
 
         // Check if treatment already added
         const alreadyAdded = prescribedTreatments.some(t => t.service_code === select.value);
@@ -588,7 +821,7 @@ document.addEventListener("DOMContentLoaded", () => {
             submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Processing...';
         }
 
-        const result = await authorizedFetch(
+        const result = await localAuthorizedFetch(
             `/api/doctor/appointments/${selectedAppointment.appointment_id}/complete`,
             { method: 'POST', body: JSON.stringify(data) }
         );
@@ -617,12 +850,27 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     };
 
+    // Availability save and reset buttons
+    if (saveBtn) {
+        saveBtn.addEventListener('click', saveAvailability);
+    }
+
+    if (resetBtn) {
+        resetBtn.addEventListener('click', () => {
+            loadAvailability();
+            showToast('Changes discarded', 'info');
+        });
+    }
+
     // Logout
     document.getElementById('logout-button').onclick = () => {
         localStorage.removeItem('clinicProToken');
         window.location.href = 'login.html';
     };
 
-    // Initialize
-    loadInitialData();
+    // --- INITIALIZATION (Combined and executed only once) ---
+    loadInitialData(); // Loads profile, stats, treatments, and appointments ('today')
+    loadAvailability(); // Initializes the availability grid and data
+
+    console.log('[PORTAL] Initialization complete');
 });
