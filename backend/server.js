@@ -310,130 +310,63 @@ app.get("/api/staff", authorize(['admin']), async (req, res) => {
     } catch (err) { handleDatabaseError(res, err); }
 });
 
-// REPLACE your existing POST /api/staff route
-
 app.post("/api/staff", authorize(['admin', 'branch manager']), async (req, res) => {
     const connection = await pool.getConnection();
     try {
         await connection.beginTransaction();
-        // Expect 'specialty_ids' as an array now
-        const { name, contact_info, branch_id, role_id, username, email, password, is_medical_staff, specialty_ids } = req.body;
+        const { name, contact_info, branch_id, role_id, username, email, password, is_medical_staff, specialty_id } = req.body;
 
-        // --- Role & Branch Validation (Keep existing logic) ---
         if (req.user.role === 'branch manager') {
             const [[role_to_assign]] = await connection.query("SELECT name FROM Role WHERE role_id = ?", [role_id]);
-            if (!role_to_assign || ['Admin', 'Branch Manager'].includes(role_to_assign.name)) {
-                 await connection.rollback(); // Rollback before throwing error
-                 connection.release();
-                 return res.status(403).json({ message: "Branch managers cannot create Admin or other Manager accounts." });
-            }
+            if (!role_to_assign || ['Admin', 'Branch Manager'].includes(role_to_assign.name)) throw new Error("Branch managers cannot create Admin or other Manager accounts.");
 
             const [[manager_branch]] = await connection.query("SELECT branch_id FROM Staff WHERE user_id = ?", [req.user.userId]);
-            if (!manager_branch || manager_branch.branch_id.toString() !== branch_id.toString()) {
-                await connection.rollback(); // Rollback before throwing error
-                connection.release();
-                return res.status(403).json({ message: "You can only add staff to your own branch." });
-            }
+            if (!manager_branch || manager_branch.branch_id.toString() !== branch_id.toString()) throw new Error("You can only add staff to your own branch.");
         }
-        // --- End Validation ---
 
-        if (!password) {
-             await connection.rollback(); // Rollback before throwing error
-             connection.release();
-             return res.status(400).json({ message: "Password is required for new staff." });
-        }
+        if (!password) throw new Error("Password is required for new staff.");
         const password_hash = await bcrypt.hash(password, 10);
 
-        // Create Account_Info
-        const [accountResult] = await connection.query(
-            "INSERT INTO Account_Info (role_id, username, password_hash, email) VALUES (?, ?, ?, ?)",
-            [role_id, username, password_hash, email]
-        );
+        const [accountResult] = await connection.query("INSERT INTO Account_Info (role_id, username, password_hash, email) VALUES (?, ?, ?, ?)", [role_id, username, password_hash, email]);
         const newUserId = accountResult.insertId;
 
-        // Create Staff
-        const [staffResult] = await connection.query(
-            "INSERT INTO Staff (user_id, name, contact_info, is_medical_staff, branch_id) VALUES (?, ?, ?, ?, ?)",
-            [newUserId, name, contact_info, is_medical_staff === '1', branch_id]
-        );
+        const [staffResult] = await connection.query("INSERT INTO Staff (user_id, name, contact_info, is_medical_staff, branch_id) VALUES (?, ?, ?, ?, ?)", [newUserId, name, contact_info, is_medical_staff === '1', branch_id]);
         const newStaffId = staffResult.insertId;
 
-        // Check if the role is 'Doctor'
         const [[roleCheck]] = await connection.query("SELECT name FROM Role WHERE role_id = ?", [role_id]);
-        if (roleCheck && roleCheck.name.toLowerCase() === 'doctor') {
-            // Validate specialty_ids
-            if (!Array.isArray(specialty_ids) || specialty_ids.length === 0) {
-                 await connection.rollback(); // Rollback before throwing error
-                 connection.release();
-                 return res.status(400).json({ message: "At least one specialty is required to create a new doctor." });
-            }
-
-            // Create Doctor record
+        if (roleCheck.name.toLowerCase() === 'doctor') {
+            if (!specialty_id) throw new Error("A specialty is required to create a new doctor.");
             const [doctorResult] = await connection.query("INSERT INTO Doctor (staff_id) VALUES (?)", [newStaffId]);
-            const newDoctorId = doctorResult.insertId;
-
-            // --- Insert MULTIPLE specialties ---
-            const specialtyValues = specialty_ids.map(specId => [newDoctorId, parseInt(specId)]); // Ensure IDs are integers
-            if (specialtyValues.length > 0) {
-                await connection.query(
-                    "INSERT INTO doctor_specialties (doctor_id, specialty_id) VALUES ?",
-                    [specialtyValues] // Use bulk insert syntax
-                );
-            }
-            // ---------------------------------
+            await connection.query("INSERT INTO doctor_specialties (doctor_id, specialty_id) VALUES (?, ?)", [doctorResult.insertId, specialty_id]);
         }
 
         await connection.commit();
         res.status(201).json({ message: "Staff record created successfully." });
-
     } catch (err) {
         await connection.rollback();
-        // Handle potential duplicate username/email errors
-        if (err.code === 'ER_DUP_ENTRY') {
-             return res.status(409).json({ message: 'Username or email already exists.' });
-        }
-        handleDatabaseError(res, err); // General error handler
+        handleDatabaseError(res, err);
     } finally {
         connection.release();
     }
 });
-// REPLACE your existing GET /api/staff/:id route
-
 app.get("/api/staff/:id", authorize(['admin']), async (req, res) => {
     try {
-        // Query basic staff and account info
-        const [staffRows] = await pool.query(`
-            SELECT
+        const [rows] = await pool.query(`
+            SELECT 
                 s.staff_id, s.name, s.contact_info, s.branch_id, s.is_medical_staff,
                 ai.role_id, ai.username, ai.email,
-                d.doctor_id -- Get doctor_id if they are a doctor
-            FROM Staff s
+                ds.specialty_id
+            FROM Staff s 
             LEFT JOIN Account_Info ai ON s.user_id = ai.user_id
             LEFT JOIN Doctor d ON s.staff_id = d.staff_id
+            LEFT JOIN doctor_specialties ds ON d.doctor_id = ds.doctor_id
             WHERE s.staff_id = ?
         `, [req.params.id]);
 
-        if (staffRows.length === 0) {
+        if (rows.length === 0) {
             return res.status(404).json({ message: "Staff not found" });
         }
-
-        const staffData = staffRows[0];
-
-        // --- If they are a doctor, get their specialties ---
-        if (staffData.doctor_id) {
-            const [specialtyRows] = await pool.query(
-                `SELECT specialty_id FROM doctor_specialties WHERE doctor_id = ?`,
-                [staffData.doctor_id]
-            );
-            // Add specialties as an array of IDs
-            staffData.specialty_ids = specialtyRows.map(row => row.specialty_id);
-        } else {
-            staffData.specialty_ids = []; // Ensure the field exists even if not a doctor
-        }
-        // ------------------------------------------------
-
-        res.json(staffData);
-
+        res.json(rows[0]);
     } catch (err) {
         handleDatabaseError(res, err);
     }
@@ -441,33 +374,20 @@ app.get("/api/staff/:id", authorize(['admin']), async (req, res) => {
 
 // [AND ADD THIS CODE BLOCK]
 // UPDATE Staff (Admin)
-// REPLACE your existing PUT /api/staff/:id route
-
 app.put("/api/staff/:id", authorize(['admin']), async (req, res) => {
     const connection = await pool.getConnection();
     const staffId = req.params.id;
-    // Expect 'specialty_ids' as an array
-    const { name, contact_info, branch_id, is_medical_staff, role_id, username, email, specialty_ids, password } = req.body;
+    const { name, contact_info, branch_id, is_medical_staff, role_id, username, email, specialty_id, password } = req.body;
 
     try {
         await connection.beginTransaction();
 
-        // 1. Get user_id and current role/doctor info
-        const [[staff]] = await connection.query(
-            `SELECT s.user_id, r.name as current_role_name, d.doctor_id
-             FROM Staff s
-             JOIN Account_Info ai ON s.user_id = ai.user_id
-             JOIN Role r ON ai.role_id = r.role_id
-             LEFT JOIN Doctor d ON s.staff_id = d.staff_id
-             WHERE s.staff_id = ?`,
-             [staffId]
-        );
+        // 1. Get the user_id from staff_id
+        const [[staff]] = await connection.query("SELECT user_id FROM Staff WHERE staff_id = ?", [staffId]);
         if (!staff) {
             throw new Error("Staff not found.");
         }
         const userId = staff.user_id;
-        const currentRoleIsDoctor = staff.current_role_name.toLowerCase() === 'doctor';
-        const currentDoctorId = staff.doctor_id;
 
         // 2. Update Staff table
         await connection.query(
@@ -478,65 +398,43 @@ app.put("/api/staff/:id", authorize(['admin']), async (req, res) => {
         // 3. Update Account_Info table (with optional password)
         let accountQuery = "UPDATE Account_Info SET role_id = ?, username = ?, email = ? WHERE user_id = ?";
         let accountParams = [role_id, username, email, userId];
-        if (password) {
+
+        if (password) { // Check if a new password was provided
             const password_hash = await bcrypt.hash(password, 10);
             accountQuery = "UPDATE Account_Info SET role_id = ?, username = ?, email = ?, password_hash = ? WHERE user_id = ?";
             accountParams = [role_id, username, email, password_hash, userId];
         }
         await connection.query(accountQuery, accountParams);
 
-        // 4. Handle Doctor/Specialty changes
-        const [[newRoleCheck]] = await connection.query("SELECT name FROM Role WHERE role_id = ?", [role_id]);
-        const newRoleIsDoctor = newRoleCheck && newRoleCheck.name.toLowerCase() === 'doctor';
-
-        let doctorIdToUpdate = currentDoctorId; // Use current doctor ID if role hasn't changed
-
-        // Scenario A: Role changed TO Doctor OR remains Doctor
-        if (newRoleIsDoctor) {
-            // Validate specialties if becoming/staying a doctor
-            if (!Array.isArray(specialty_ids) || specialty_ids.length === 0) {
-                await connection.rollback();
-                connection.release();
-                return res.status(400).json({ message: "At least one specialty is required for a doctor role." });
+        // 4. Handle Doctor/Specialty
+        const [[roleCheck]] = await connection.query("SELECT name FROM Role WHERE role_id = ?", [role_id]);
+        if (roleCheck.name.toLowerCase() === 'doctor') {
+            if (!specialty_id) {
+                throw new Error("A specialty is required for a doctor.");
             }
 
-            // If they weren't a doctor before, create the Doctor record
-            if (!currentRoleIsDoctor) {
+            // Check if doctor record exists
+            const [[doctor]] = await connection.query("SELECT doctor_id FROM Doctor WHERE staff_id = ?", [staffId]);
+
+            let doctorId;
+            if (!doctor) {
+                // Create doctor record if it doesn't exist
                 const [docResult] = await connection.query("INSERT INTO Doctor (staff_id) VALUES (?)", [staffId]);
-                doctorIdToUpdate = docResult.insertId;
+                doctorId = docResult.insertId;
+            } else {
+                doctorId = doctor.doctor_id;
             }
 
-            // Clear existing specialties for this doctor
-            await connection.query("DELETE FROM doctor_specialties WHERE doctor_id = ?", [doctorIdToUpdate]);
-
-            // Insert new specialties
-            const specialtyValues = specialty_ids.map(specId => [doctorIdToUpdate, parseInt(specId)]);
-            if (specialtyValues.length > 0) {
-                await connection.query(
-                    "INSERT INTO doctor_specialties (doctor_id, specialty_id) VALUES ?",
-                    [specialtyValues]
-                );
-            }
+            // Update specialty (delete old, insert new for simplicity)
+            await connection.query("DELETE FROM doctor_specialties WHERE doctor_id = ?", [doctorId]);
+            await connection.query("INSERT INTO doctor_specialties (doctor_id, specialty_id) VALUES (?, ?)", [doctorId, specialty_id]);
         }
-        // Scenario B: Role changed FROM Doctor to something else
-        else if (currentRoleIsDoctor && !newRoleIsDoctor) {
-            // Delete the doctor record (FK constraint should handle doctor_specialties)
-            // Note: This relies on your trigger NOT blocking if they have future appointments.
-            // You might need more complex logic if you want to prevent changing roles if appointments exist.
-            await connection.query("DELETE FROM Doctor WHERE doctor_id = ?", [currentDoctorId]);
-            // If FK doesn't cascade, delete specialties manually:
-            // await connection.query("DELETE FROM doctor_specialties WHERE doctor_id = ?", [currentDoctorId]);
-        }
-        // Scenario C: Role is not Doctor and remains not Doctor - do nothing with specialties/doctor table
 
         await connection.commit();
         res.status(200).json({ message: "Staff member updated successfully." });
 
     } catch (err) {
         await connection.rollback();
-        if (err.code === 'ER_DUP_ENTRY') {
-             return res.status(409).json({ message: 'Username or email already exists.' });
-        }
         handleDatabaseError(res, err);
     } finally {
         connection.release();

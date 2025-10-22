@@ -326,147 +326,77 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     // [New openStaffForm function]
-    // Replace the existing openStaffForm function with this one
+    const openStaffForm = async (id = null) => {
+        const isEditing = id !== null;
 
-const openStaffForm = async (id = null) => {
-    const isEditing = id !== null;
+        // Fetch all required lists and existing staff data (if editing)
+        const [roles, branches, specialties, staffData] = await Promise.all([
+            authorizedFetch("/api/list/roles"),
+            authorizedFetch("/api/list/branches"),
+            authorizedFetch("/api/list/specialties"),
+            isEditing ? authorizedFetch(`/api/staff/${id}`) : Promise.resolve({})
+        ]);
 
-    // Fetch all required lists and existing staff data (if editing)
-    // Assumes GET /api/staff/:id now returns staffData.specialty_ids as an array e.g., [1, 5]
-    const [roles, branches, specialties, staffData] = await Promise.all([
-        authorizedFetch("/api/list/roles"),
-        authorizedFetch("/api/list/branches"),
-        authorizedFetch("/api/list/specialties"),
-        isEditing ? authorizedFetch(`/api/staff/${id}`) : Promise.resolve({})
-    ]);
+        // Check if fetching data failed
+        if (isEditing && !staffData) {
+            showToast('Could not fetch staff details.', 'danger');
+            return;
+        }
 
-    // Check if fetching any required data failed
-    if (!roles || !branches || !specialties || (isEditing && !staffData)) {
-        showToast('Could not fetch required data to open form.', 'danger');
-        return;
-    }
-    // For Branch Manager: Filter out Admin/Manager roles when *adding* new staff
-    const availableRoles = (typeof userProfile !== 'undefined' && userProfile.branch_id && !isEditing)
-        ? roles.filter(r => !['admin', 'branch manager'].includes(r.name.toLowerCase()))
-        : roles;
+        formModalLabel.textContent = isEditing ? `Edit Staff: ${staffData.name}` : "Add New Staff";
 
-
-    formModalLabel.textContent = isEditing ? `Edit Staff: ${staffData.name}` : "Add New Staff";
-
-    // --- Generate Specialty Checkboxes ---
-    let specialtyCheckboxesHTML = '';
-    if (specialties && specialties.length > 0) {
-        specialtyCheckboxesHTML = specialties.map(spec => `
-            <div class="form-check form-check-inline">
-                <input class="form-check-input specialty-checkbox" type="checkbox" name="specialty_ids[]" value="${spec.specialty_id}" id="spec-${spec.specialty_id}"
-                       ${isEditing && staffData.specialty_ids && staffData.specialty_ids.includes(spec.specialty_id) ? 'checked' : ''}>
-                <label class="form-check-label" for="spec-${spec.specialty_id}">${spec.name}</label>
+        formModalBody.innerHTML = `<form id="modal-form">
+            <div class="row">
+                <h5>Staff Details</h5>
+                <div class="col-md-6 mb-3"><label>Full Name</label><input type="text" name="name" class="form-control" value="${staffData.name || ''}" required></div>
+                <div class="col-md-6 mb-3"><label>Contact Info</label><input type="text" name="contact_info" class="form-control" value="${staffData.contact_info || ''}" required></div>
+                <div class="col-md-6 mb-3"><label>Branch</label><select name="branch_id" class="form-select" required>${createOptions(branches, "branch_id", "name", staffData.branch_id)}</select></div>
+                <div class="col-md-6 mb-3 pt-3 form-check"><input type="checkbox" name="is_medical_staff" class="form-check-input" value="1" ${staffData.is_medical_staff ? 'checked' : ''}><label class="form-check-label">Is Medical Staff</label></div>
             </div>
-        `).join('');
-    } else {
-        specialtyCheckboxesHTML = '<p class="text-muted">No specialties available.</p>';
-    }
-    // ------------------------------------
+            <hr>
+            <h5>Account Details</h5>
+            <div class="row">
+                <div class="col-md-6 mb-3"><label>Username</label><input type="text" name="username" class="form-control" value="${staffData.username || ''}" required></div>
+                <div class="col-md-6 mb-3"><label>Email</label><input type="email" name="email" class="form-control" value="${staffData.email || ''}" required></div>
+                <div class="col-md-6 mb-3"><label>Role</label><select name="role_id" class="form-select" required>${createOptions(roles, "role_id", "name", staffData.role_id)}</select></div>
+                <div class="col-md-6 mb-3 d-none" id="specialty-container"><label>Specialty</label><select name="specialty_id" class="form-select">${createOptions(specialties, "specialty_id", "name", staffData.specialty_id)}</select></div>
+                <div class="col-md-6 mb-3"><label>Password</label><input type="password" name="password" class="form-control" placeholder="${isEditing ? 'Leave blank to keep unchanged' : ''}" ${!isEditing ? 'required' : ''}></div>
+            </div>
+            <div class="modal-footer mt-4"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button><button type="submit" class="btn btn-primary">Save</button></div>
+        </form>`;
 
-    formModalBody.innerHTML = `<form id="modal-form">
-        ${
-            // Include hidden branch_id only for Branch Manager adding staff
-            (typeof userProfile !== 'undefined' && userProfile.branch_id && !isEditing)
-            ? `<input type="hidden" name="branch_id" value="${userProfile.branch_id}">`
-            : ''
-        }
-        <div class="row">
-            <h5>Staff Details</h5>
-            <div class="col-md-6 mb-3"><label>Full Name</label><input type="text" name="name" class="form-control" value="${staffData.name || ''}" required></div>
-            <div class="col-md-6 mb-3"><label>Contact Info</label><input type="text" name="contact_info" class="form-control" value="${staffData.contact_info || ''}" required></div>
-            ${
-                // Show Branch dropdown only for Admin
-                (typeof userProfile === 'undefined' || !userProfile.branch_id)
-                ? `<div class="col-md-6 mb-3"><label>Branch</label><select name="branch_id" class="form-select" required>${createOptions(branches, "branch_id", "name", staffData.branch_id)}</select></div>`
-                : '' // Branch Manager's branch is set via hidden input or backend logic
+        formModal.show();
+
+        const roleSelect = formModalBody.querySelector('[name="role_id"]');
+        const specialtyContainer = document.getElementById('specialty-container');
+
+        // Function to show/hide specialty dropdown based on role
+        const toggleSpecialty = () => {
+            const selectedRoleText = roleSelect.options[roleSelect.selectedIndex]?.text.toLowerCase();
+            specialtyContainer.classList.toggle('d-none', selectedRoleText !== 'doctor');
+        };
+
+        roleSelect.onchange = toggleSpecialty;
+        toggleSpecialty(); // Run on form load
+
+        // Handle form submission
+        document.getElementById("modal-form").onsubmit = e => {
+            e.preventDefault();
+            const data = Object.fromEntries(new FormData(e.target));
+
+            // On edit, if password field is empty, don't send it
+            if (isEditing && !data.password) {
+                delete data.password;
             }
-            <div class="col-md-6 mb-3 pt-3 form-check"><input type="checkbox" name="is_medical_staff" class="form-check-input" value="1" ${staffData.is_medical_staff ? 'checked' : ''}><label class="form-check-label">Is Medical Staff</label></div>
-        </div>
-        <hr>
-        <h5>Account Details</h5>
-        <div class="row">
-            <div class="col-md-6 mb-3"><label>Username</label><input type="text" name="username" class="form-control" value="${staffData.username || ''}" required></div>
-            <div class="col-md-6 mb-3"><label>Email</label><input type="email" name="email" class="form-control" value="${staffData.email || ''}" required></div>
-            <div class="col-md-6 mb-3"><label>Role</label><select name="role_id" class="form-select" required>${createOptions(availableRoles, "role_id", "name", staffData.role_id)}</select></div>
-            <div class="col-md-6 mb-3"><label>Password</label><input type="password" name="password" class="form-control" placeholder="${isEditing ? 'Leave blank to keep unchanged' : ''}" ${!isEditing ? 'required' : ''}></div>
-        </div>
-        <hr>
-        <div id="specialty-container" class="mb-3 d-none">
-             <h5>Specialties (for Doctors)</h5>
-             ${specialtyCheckboxesHTML}
-        </div>
 
-        <div class="modal-footer mt-4"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button><button type="submit" class="btn btn-primary">Save</button></div>
-    </form>`;
-
-    formModal.show();
-
-    const form = document.getElementById("modal-form");
-    const roleSelect = form.querySelector('[name="role_id"]');
-    const specialtyContainer = document.getElementById('specialty-container');
-
-    // Function to show/hide specialty checkboxes based on role
-    const toggleSpecialty = () => {
-        const selectedRoleText = roleSelect.options[roleSelect.selectedIndex]?.text.toLowerCase();
-        specialtyContainer.classList.toggle('d-none', selectedRoleText !== 'doctor');
+            submitForm(
+                isEditing ? `/api/staff/${id}` : "/api/staff",
+                isEditing ? "PUT" : "POST",
+                data,
+                loadStaffPage
+            );
+        };
     };
-
-    roleSelect.onchange = toggleSpecialty;
-    toggleSpecialty(); // Run on form load to set initial state
-
-    // --- Handle form submission ---
-    form.onsubmit = e => {
-        e.preventDefault();
-        const formData = new FormData(form);
-        const data = Object.fromEntries(formData.entries());
-
-        // --- Manually collect checked specialty IDs ---
-        const selectedSpecialtyIds = [];
-        const specialtyCheckboxes = form.querySelectorAll('.specialty-checkbox:checked');
-        specialtyCheckboxes.forEach(checkbox => {
-            selectedSpecialtyIds.push(checkbox.value);
-        });
-        // Add the array to the data payload (use the key your backend expects, e.g., "specialty_ids")
-        data.specialty_ids = selectedSpecialtyIds;
-        // -------------------------------------------
-
-        // If the role is not 'Doctor', remove the specialty_ids to avoid sending empty/irrelevant data
-        const selectedRoleText = roleSelect.options[roleSelect.selectedIndex]?.text.toLowerCase();
-        if (selectedRoleText !== 'doctor') {
-            delete data.specialty_ids;
-            // Also remove the placeholder 'specialty_ids[]' key if FormData created it
-            delete data['specialty_ids[]'];
-        } else {
-             // If it is a doctor but no specialties selected, ensure an empty array is sent (if backend requires it)
-             if (!data.specialty_ids || data.specialty_ids.length === 0) {
-                data.specialty_ids = [];
-             }
-             delete data['specialty_ids[]']; // Clean up potential FormData artifact
-        }
-
-
-        // On edit, if password field is empty, don't send it
-        if (isEditing && !data.password) {
-            delete data.password;
-        }
-
-        // Handle checkbox 'is_medical_staff' (FormData sends '1' if checked, nothing if not)
-        data.is_medical_staff = formData.has('is_medical_staff') ? '1' : '0';
-
-
-        submitForm(
-            isEditing ? `/api/staff/${id}` : "/api/staff",
-            isEditing ? "PUT" : "POST",
-            data,
-            loadStaffPage // Or the appropriate refresh function for the current view
-        );
-    };
-};
     const openSimpleForm = async (type, id = null) => {
         const isEditing = id !== null;
         const data = isEditing ? await authorizedFetch(`/api/${type}s/${id}`) : {};
