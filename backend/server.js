@@ -348,7 +348,7 @@ app.post("/api/staff", authorize(['admin', 'branch manager']), async (req, res) 
     const connection = await pool.getConnection();
     try {
         await connection.beginTransaction();
-        const { name, contact_info, branch_id, role_id, username, email, password, is_medical_staff, specialty_id } = req.body;
+        const { name, contact_info, branch_id, role_id, username, email, password, is_medical_staff, specialty_ids } = req.body;
 
         if (req.user.role === 'branch manager') {
             const [[role_to_assign]] = await connection.query("SELECT name FROM Role WHERE role_id = ?", [role_id]);
@@ -369,9 +369,14 @@ app.post("/api/staff", authorize(['admin', 'branch manager']), async (req, res) 
 
         const [[roleCheck]] = await connection.query("SELECT name FROM Role WHERE role_id = ?", [role_id]);
         if (roleCheck.name.toLowerCase() === 'doctor') {
-            if (!specialty_id) throw new Error("A specialty is required to create a new doctor.");
+            const specialtiesToAdd = Array.isArray(specialty_ids) ? specialty_ids : (specialty_ids ? [specialty_ids] : []);
+            if (specialtiesToAdd.length === 0) throw new Error("At least one specialty is required to create a new doctor.");
+
             const [doctorResult] = await connection.query("INSERT INTO Doctor (staff_id) VALUES (?)", [newStaffId]);
-            await connection.query("INSERT INTO doctor_specialties (doctor_id, specialty_id) VALUES (?, ?)", [doctorResult.insertId, specialty_id]);
+            const doctorId = doctorResult.insertId;
+
+            const specialtyValues = specialtiesToAdd.map(sid => [doctorId, sid]);
+            await connection.query("INSERT INTO doctor_specialties (doctor_id, specialty_id) VALUES ?", [specialtyValues]);
         }
 
         await connection.commit();
@@ -411,7 +416,7 @@ app.get("/api/staff/:id", authorize(['admin']), async (req, res) => {
 app.put("/api/staff/:id", authorize(['admin']), async (req, res) => {
     const connection = await pool.getConnection();
     const staffId = req.params.id;
-    const { name, contact_info, branch_id, is_medical_staff, role_id, username, email, specialty_id, password } = req.body;
+    const { name, contact_info, branch_id, is_medical_staff, role_id, username, email, specialty_ids, password } = req.body;
 
     try {
         await connection.beginTransaction();
@@ -443,8 +448,9 @@ app.put("/api/staff/:id", authorize(['admin']), async (req, res) => {
         // 4. Handle Doctor/Specialty
         const [[roleCheck]] = await connection.query("SELECT name FROM Role WHERE role_id = ?", [role_id]);
         if (roleCheck.name.toLowerCase() === 'doctor') {
-            if (!specialty_id) {
-                throw new Error("A specialty is required for a doctor.");
+            const specialtiesToAdd = Array.isArray(specialty_ids) ? specialty_ids : (specialty_ids ? [specialty_ids] : []);
+            if (specialtiesToAdd.length === 0) {
+                throw new Error("At least one specialty is required for a doctor.");
             }
 
             // Check if doctor record exists
@@ -459,9 +465,10 @@ app.put("/api/staff/:id", authorize(['admin']), async (req, res) => {
                 doctorId = doctor.doctor_id;
             }
 
-            // Update specialty (delete old, insert new for simplicity)
+            // Update specialties (delete old, insert new)
             await connection.query("DELETE FROM doctor_specialties WHERE doctor_id = ?", [doctorId]);
-            await connection.query("INSERT INTO doctor_specialties (doctor_id, specialty_id) VALUES (?, ?)", [doctorId, specialty_id]);
+            const specialtyValues = specialtiesToAdd.map(sid => [doctorId, sid]);
+            await connection.query("INSERT INTO doctor_specialties (doctor_id, specialty_id) VALUES ?", [specialtyValues]);
         }
 
         await connection.commit();
@@ -1124,6 +1131,107 @@ app.get("/api/branch-manager/reports/doctor-revenue", authorize(['branch manager
 app.get("/api/branch-manager/reports/outstanding-balances", authorize(['branch manager']), getBranchInfoFromToken, async (req, res) => {
     try {
         const [rows] = await pool.query(`SELECT p.name as patient_name, i.invoice_id, i.due_amount FROM Invoice i JOIN Appointment a ON i.appointment_id = a.appointment_id JOIN Patient p ON a.patient_id = p.patient_id WHERE a.branch_id = ? AND i.due_amount > 0 ORDER BY p.name`, [req.branchId]);
+        res.json(rows);
+    } catch (err) { handleDatabaseError(res, err); }
+});
+
+app.get("/api/branch-manager/reports/yearly-revenue", authorize(['branch manager']), getBranchInfoFromToken, async (req, res) => {
+    try {
+        const [rows] = await pool.query(`
+            SELECT
+                DATE_FORMAT(i.issued_date, '%Y-%m') AS month,
+                SUM(i.total_amount) AS total_revenue,
+                SUM(CASE WHEN i.status = 'Paid' THEN i.total_amount ELSE 0 END) AS paid_revenue,
+                SUM(CASE WHEN i.status = 'Partially Paid' THEN i.total_amount ELSE 0 END) AS partial_revenue,
+                SUM(CASE WHEN i.status = 'Pending' THEN i.total_amount ELSE 0 END) AS pending_revenue
+            FROM Invoice i
+            JOIN Appointment a ON i.appointment_id = a.appointment_id
+            WHERE a.branch_id = ? AND YEAR(i.issued_date) = YEAR(CURDATE())
+            GROUP BY DATE_FORMAT(i.issued_date, '%Y-%m')
+            ORDER BY DATE_FORMAT(i.issued_date, '%Y-%m') ASC
+        `, [req.branchId]);
+        res.json(rows);
+    } catch (err) { handleDatabaseError(res, err); }
+});
+
+app.get("/api/branch-manager/reports/patient-arrivals", authorize(['branch manager']), getBranchInfoFromToken, async (req, res) => {
+    try {
+        const [rows] = await pool.query(`
+            SELECT
+                DATE_FORMAT(a.schedule_date, '%Y-%m') AS month,
+                COUNT(DISTINCT a.patient_id) AS unique_patients,
+                COUNT(*) AS total_appointments,
+                SUM(CASE WHEN a.status = 'Completed' THEN 1 ELSE 0 END) AS completed,
+                SUM(CASE WHEN a.status = 'Scheduled' THEN 1 ELSE 0 END) AS scheduled,
+                SUM(CASE WHEN a.status = 'Cancelled' THEN 1 ELSE 0 END) AS cancelled,
+                SUM(CASE WHEN a.is_emergency = 1 THEN 1 ELSE 0 END) AS emergency
+            FROM Appointment a
+            WHERE a.branch_id = ? AND YEAR(a.schedule_date) = YEAR(CURDATE())
+            GROUP BY DATE_FORMAT(a.schedule_date, '%Y-%m')
+            ORDER BY DATE_FORMAT(a.schedule_date, '%Y-%m') ASC
+        `, [req.branchId]);
+        res.json(rows);
+    } catch (err) { handleDatabaseError(res, err); }
+});
+
+app.get("/api/branch-manager/reports/branch-summary", authorize(['branch manager']), getBranchInfoFromToken, async (req, res) => {
+    try {
+        const [rows] = await pool.query(`
+            SELECT
+                DATE(a.schedule_date) AS appointment_date,
+                COUNT(*) AS total_appointments,
+                SUM(CASE WHEN a.status = 'Scheduled' THEN 1 ELSE 0 END) AS scheduled,
+                SUM(CASE WHEN a.status = 'Completed' THEN 1 ELSE 0 END) AS completed,
+                SUM(CASE WHEN a.status = 'Cancelled' THEN 1 ELSE 0 END) AS cancelled,
+                SUM(CASE WHEN a.is_emergency = 1 THEN 1 ELSE 0 END) AS emergency
+            FROM Appointment a
+            WHERE a.branch_id = ? AND YEAR(a.schedule_date) = YEAR(CURDATE())
+            GROUP BY DATE(a.schedule_date)
+            ORDER BY DATE(a.schedule_date) DESC
+        `, [req.branchId]);
+        res.json(rows);
+    } catch (err) { handleDatabaseError(res, err); }
+});
+
+app.get("/api/branch-manager/reports/treatment-stats", authorize(['branch manager']), getBranchInfoFromToken, async (req, res) => {
+    try {
+        const [rows] = await pool.query(`
+            SELECT
+                tc.service_code,
+                tc.name AS treatment_name,
+                COUNT(at.appointment_id) AS times_performed,
+                SUM(at.actual_price) AS total_revenue,
+                AVG(at.actual_price) AS avg_price
+            FROM Treatment_Catalogue tc
+            LEFT JOIN Appointment_Treatment at ON tc.service_code = at.service_code
+            LEFT JOIN Appointment a ON at.appointment_id = a.appointment_id
+            WHERE a.branch_id = ? AND a.status = 'Completed' AND YEAR(a.schedule_date) = YEAR(CURDATE())
+            GROUP BY tc.service_code, tc.name
+            ORDER BY total_revenue DESC
+        `, [req.branchId]);
+        res.json(rows);
+    } catch (err) { handleDatabaseError(res, err); }
+});
+
+app.get("/api/branch-manager/reports/insurance-analysis", authorize(['branch manager']), getBranchInfoFromToken, async (req, res) => {
+    try {
+        const [rows] = await pool.query(`
+            SELECT
+                ip.name AS insurance_provider,
+                COUNT(DISTINCT a.patient_id) AS total_patients,
+                COUNT(DISTINCT i.invoice_id) AS total_invoices,
+                SUM(i.total_amount) AS total_billed,
+                SUM(i.insurance_coverage) AS total_insurance_coverage,
+                SUM(i.out_of_pocket_amount) AS total_out_of_pocket,
+                ROUND(AVG(i.insurance_coverage / i.total_amount * 100), 2) AS avg_coverage_percent
+            FROM Insurance_Provider ip
+            LEFT JOIN Patient p ON ip.id = p.insurance_provider_id
+            LEFT JOIN Appointment a ON p.patient_id = a.patient_id
+            LEFT JOIN Invoice i ON a.appointment_id = i.appointment_id
+            WHERE a.branch_id = ? AND i.invoice_id IS NOT NULL AND YEAR(a.schedule_date) = YEAR(CURDATE())
+            GROUP BY ip.id, ip.name
+            ORDER BY total_billed DESC
+        `, [req.branchId]);
         res.json(rows);
     } catch (err) { handleDatabaseError(res, err); }
 });

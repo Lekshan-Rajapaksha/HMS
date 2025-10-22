@@ -120,7 +120,40 @@ document.addEventListener("DOMContentLoaded", () => {
                 <div class="col-xl-3 col-md-6 mb-4"><div class="card"><div class="card-body"><div class="d-flex align-items-center"><i class="bi bi-calendar-check fs-2 text-success me-3"></i><div><div class="text-muted">Completed Today</div><div class="h5 fw-bold">${stats.completed_today}</div></div></div></div></div></div>
                 <div class="col-xl-3 col-md-6 mb-4"><div class="card"><div class="card-body"><div class="d-flex align-items-center"><i class="bi bi-calendar-x fs-2 text-danger me-3"></i><div><div class="text-muted">Cancelled Today</div><div class="h5 fw-bold">${stats.canceled_today || 0}</div></div></div></div></div></div>
                 <div class="col-xl-3 col-md-6 mb-4"><div class="card"><div class="card-body"><div class="d-flex align-items-center"><i class="bi bi-people-fill fs-2 text-info me-3"></i><div><div class="text-muted">Total Staff</div><div class="h5 fw-bold">${stats.staff}</div></div></div></div></div></div>
+            </div>
+            <div class="row mt-4">
+                <div class="col-lg-6 mb-4">
+                    <div class="card">
+                        <div class="card-header">Yearly Revenue Overview</div>
+                        <div class="card-body" id="yearly-revenue-container"></div>
+                    </div>
+                </div>
+                <div class="col-lg-6 mb-4">
+                    <div class="card">
+                        <div class="card-header">Patient Arrivals (Monthly)</div>
+                        <div class="card-body" id="patient-arrivals-container"></div>
+                    </div>
+                </div>
             </div>`;
+        
+        const [yearlyRevenue, patientArrivals] = await Promise.all([
+            authorizedFetch('/api/branch-manager/reports/yearly-revenue'),
+            authorizedFetch('/api/branch-manager/reports/patient-arrivals')
+        ]);
+        
+        const yearlyRevenueContainer = document.getElementById('yearly-revenue-container');
+        if (yearlyRevenue && yearlyRevenue.length > 0) {
+            yearlyRevenueContainer.innerHTML = `<div style="max-height: 300px; overflow-y: auto;"><table class="table table-sm"><thead><tr><th>Month</th><th>Total Revenue</th><th>Paid</th><th>Pending</th></tr></thead><tbody>${yearlyRevenue.map(r => `<tr><td>${r.month}</td><td>Rs.${parseFloat(r.total_revenue || 0).toFixed(2)}</td><td>Rs.${parseFloat(r.paid_revenue || 0).toFixed(2)}</td><td>Rs.${parseFloat(r.pending_revenue || 0).toFixed(2)}</td></tr>`).join('')}</tbody></table></div>`;
+        } else {
+            yearlyRevenueContainer.innerHTML = `<p class="text-muted text-center p-3">No revenue data available for this year.</p>`;
+        }
+        
+        const patientArrivalsContainer = document.getElementById('patient-arrivals-container');
+        if (patientArrivals && patientArrivals.length > 0) {
+            patientArrivalsContainer.innerHTML = `<div style="max-height: 300px; overflow-y: auto;"><table class="table table-sm"><thead><tr><th>Month</th><th>Unique Patients</th><th>Appointments</th><th>Completed</th></tr></thead><tbody>${patientArrivals.map(p => `<tr><td>${p.month}</td><td>${p.unique_patients}</td><td>${p.total_appointments}</td><td>${p.completed}</td></tr>`).join('')}</tbody></table></div>`;
+        } else {
+            patientArrivalsContainer.innerHTML = `<p class="text-muted text-center p-3">No patient arrival data available for this year.</p>`;
+        }
     };
 
     const renderAppointmentsTable = (data) => {
@@ -180,8 +213,16 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     const loadReportsPage = async () => {
-        mainContent.innerHTML = `<h1>Branch Reports</h1>`;
-        const [revenue, balances] = await Promise.all([authorizedFetch('/api/branch-manager/reports/doctor-revenue'), authorizedFetch('/api/branch-manager/reports/outstanding-balances')]);
+        mainContent.innerHTML = `<h1>Branch Reports</h1><p class="text-muted">Comprehensive analytics and insights for your branch operations.</p>`;
+        
+        const [revenue, balances, branchSummary, treatmentStats, insuranceAnalysis] = await Promise.all([
+            authorizedFetch('/api/branch-manager/reports/doctor-revenue'),
+            authorizedFetch('/api/branch-manager/reports/outstanding-balances'),
+            authorizedFetch('/api/branch-manager/reports/branch-summary'),
+            authorizedFetch('/api/branch-manager/reports/treatment-stats'),
+            authorizedFetch('/api/branch-manager/reports/insurance-analysis')
+        ]);
+        
         mainContent.innerHTML += `
             <div class="row">
                 <div class="col-lg-6 mb-4">
@@ -200,6 +241,34 @@ document.addEventListener("DOMContentLoaded", () => {
                         </div>
                     </div>
                 </div>
+            </div>
+            <div class="row">
+                <div class="col-lg-6 mb-4">
+                    <div class="card">
+                        <div class="card-header">Appointment Summary</div>
+                        <div class="card-body">
+                           <div class="table-responsive" id="summary-report"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-lg-6 mb-4">
+                    <div class="card">
+                        <div class="card-header">Treatment Statistics</div>
+                        <div class="card-body">
+                           <div class="table-responsive" id="treatment-report"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-lg-12 mb-4">
+                    <div class="card">
+                        <div class="card-header">Insurance Coverage Analysis</div>
+                        <div class="card-body">
+                           <div class="table-responsive" id="insurance-report"></div>
+                        </div>
+                    </div>
+                </div>
             </div>`;
 
         const revenueContainer = document.getElementById('revenue-report');
@@ -214,6 +283,27 @@ document.addEventListener("DOMContentLoaded", () => {
             balancesContainer.innerHTML = `<table class="table"><thead><tr><th>Patient</th><th>Invoice ID</th><th>Amount Due</th></tr></thead><tbody>${balances.map(b => `<tr><td>${b.patient_name}</td><td>#${b.invoice_id}</td><td>Rs.${parseFloat(b.due_amount).toFixed(2)}</td></tr>`).join('')}</tbody></table>`;
         } else {
             balancesContainer.innerHTML = `<p class="text-muted text-center p-3">No outstanding balances.</p>`;
+        }
+
+        const summaryContainer = document.getElementById('summary-report');
+        if (branchSummary && branchSummary.length > 0) {
+            summaryContainer.innerHTML = `<table class="table table-sm"><thead><tr><th>Date</th><th>Total</th><th>Completed</th><th>Cancelled</th></tr></thead><tbody>${branchSummary.slice(0, 10).map(s => `<tr><td>${new Date(s.appointment_date).toLocaleDateString()}</td><td>${s.total_appointments}</td><td>${s.completed}</td><td>${s.cancelled}</td></tr>`).join('')}</tbody></table>`;
+        } else {
+            summaryContainer.innerHTML = `<p class="text-muted text-center p-3">No appointment data available.</p>`;
+        }
+
+        const treatmentContainer = document.getElementById('treatment-report');
+        if (treatmentStats && treatmentStats.length > 0) {
+            treatmentContainer.innerHTML = `<table class="table table-sm"><thead><tr><th>Treatment</th><th>Performed</th><th>Revenue</th></tr></thead><tbody>${treatmentStats.map(t => `<tr><td>${t.treatment_name}</td><td>${t.times_performed || 0}</td><td>Rs.${parseFloat(t.total_revenue || 0).toFixed(2)}</td></tr>`).join('')}</tbody></table>`;
+        } else {
+            treatmentContainer.innerHTML = `<p class="text-muted text-center p-3">No treatment data available.</p>`;
+        }
+
+        const insuranceContainer = document.getElementById('insurance-report');
+        if (insuranceAnalysis && insuranceAnalysis.length > 0) {
+            insuranceContainer.innerHTML = `<table class="table table-sm"><thead><tr><th>Insurance Provider</th><th>Patients</th><th>Coverage</th><th>Out-of-Pocket</th><th>Avg %</th></tr></thead><tbody>${insuranceAnalysis.map(i => `<tr><td>${i.insurance_provider}</td><td>${i.total_patients}</td><td>Rs.${parseFloat(i.total_insurance_coverage || 0).toFixed(2)}</td><td>Rs.${parseFloat(i.total_out_of_pocket || 0).toFixed(2)}</td><td>${i.avg_coverage_percent || 0}%</td></tr>`).join('')}</tbody></table>`;
+        } else {
+            insuranceContainer.innerHTML = `<p class="text-muted text-center p-3">No insurance data available.</p>`;
         }
     };
 
@@ -231,10 +321,29 @@ document.addEventListener("DOMContentLoaded", () => {
             const specialties = await authorizedFetch('/api/list/specialties');
             const filteredRoles = roles.filter(r => !['admin', 'branch manager'].includes(r.name.toLowerCase()));
             formModalLabel.textContent = "Add New Staff to Your Branch";
-            formModalBody.innerHTML = `<form id="modal-form"><input type="hidden" name="branch_id" value="${userProfile.branch_id}"><div class="row"><div class="col-md-6 mb-3"><label>Full Name</label><input type="text" name="name" class="form-control" required></div><div class="col-md-6 mb-3"><label>Contact</label><input type="text" name="contact_info" class="form-control" required></div><div class="col-md-6 mb-3"><label>Role</label><select class="form-select" name="role_id" required>${filteredRoles.map(r => `<option value="${r.role_id}">${r.name}</option>`).join('')}</select></div><div class="col-md-6 mb-3 d-none" id="specialty-container"><label>Specialty</label><select class="form-select" name="specialty_id">${specialties.map(s => `<option value="${s.specialty_id}">${s.name}</option>`).join('')}</select></div><div class="col-md-6 mb-3"><label>Username</label><input type="text" name="username" class="form-control" required></div><div class="col-md-6 mb-3"><label>Password</label><input type="password" name="password" class="form-control" required></div><div class="col-md-6 mb-3"><label>Email</label><input type="email" name="email" class="form-control" required></div></div><div class="form-check mb-3"><input type="checkbox" name="is_medical_staff" class="form-check-input" value="1"><label class="form-check-label">Is Medical Staff</label></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button><button type="submit" class="btn btn-primary">Create</button></div></form>`;
+            formModalBody.innerHTML = `<form id="modal-form"><input type="hidden" name="branch_id" value="${userProfile.branch_id}"><div class="row"><div class="col-md-6 mb-3"><label>Full Name</label><input type="text" name="name" class="form-control" required></div><div class="col-md-6 mb-3"><label>Contact</label><input type="text" name="contact_info" class="form-control" required></div><div class="col-md-6 mb-3"><label>Role</label><select class="form-select" name="role_id" required>${filteredRoles.map(r => `<option value="${r.role_id}">${r.name}</option>`).join('')}</select></div><div class="col-md-6 mb-3 d-none" id="specialty-container"><label>Specialties</label><div id="specialty-checkboxes" style="max-height: 150px; overflow-y: auto; border: 1px solid #dee2e6; padding: 8px; border-radius: 4px;"></div></div><div class="col-md-6 mb-3"><label>Username</label><input type="text" name="username" class="form-control" required></div><div class="col-md-6 mb-3"><label>Password</label><input type="password" name="password" class="form-control" required></div><div class="col-md-6 mb-3"><label>Email</label><input type="email" name="email" class="form-control" required></div></div><div class="form-check mb-3"><input type="checkbox" name="is_medical_staff" class="form-check-input" value="1"><label class="form-check-label">Is Medical Staff</label></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button><button type="submit" class="btn btn-primary">Create Staff</button></div></form>`;
+            
+            const specialtyContainer = document.getElementById('specialty-checkboxes');
+            if (specialties && specialties.length > 0) {
+                specialtyContainer.innerHTML = specialties.map(s => `<div class="form-check"><input type="checkbox" class="form-check-input specialty-checkbox" id="spec-${s.specialty_id}" value="${s.specialty_id}" data-specialty-name="${s.name}"><label class="form-check-label" for="spec-${s.specialty_id}">${s.name}</label></div>`).join('');
+            }
+            
             const roleSelect = formModalBody.querySelector('[name="role_id"]');
-            roleSelect.onchange = e => document.getElementById('specialty-container').classList.toggle('d-none', e.target.selectedOptions[0].text.toLowerCase() !== 'doctor');
-            document.getElementById("modal-form").onsubmit = e => { e.preventDefault(); submitForm("/api/staff", "POST", Object.fromEntries(new FormData(e.target)), loadStaffPage); };
+            roleSelect.onchange = e => {
+                const isDoctor = e.target.selectedOptions[0].text.toLowerCase() === 'doctor';
+                document.getElementById('specialty-container').classList.toggle('d-none', !isDoctor);
+            };
+            
+            document.getElementById("modal-form").onsubmit = e => {
+                e.preventDefault();
+                const formData = new FormData(e.target);
+                const data = Object.fromEntries(formData);
+                const selectedSpecialties = Array.from(document.querySelectorAll('.specialty-checkbox:checked')).map(cb => parseInt(cb.value));
+                if (selectedSpecialties.length > 0) {
+                    data.specialty_ids = selectedSpecialties;
+                }
+                submitForm("/api/staff", "POST", data, loadStaffPage);
+            };
         }
         formModal.show();
     };
@@ -279,7 +388,5 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     };
 
-
     initializeDashboard();
 });
-
