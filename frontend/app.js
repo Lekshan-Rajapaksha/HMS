@@ -222,7 +222,12 @@ document.addEventListener("DOMContentLoaded", () => {
     // --- PAGE LOADERS ---
     const loadDashboard = async () => {
         renderSpinner();
-        const [summary, invoices] = await Promise.all([authorizedFetch("/api/stats/summary"), authorizedFetch("/api/invoices")]);
+        const [summary, invoices, monthlyRevenue, branchRevenue] = await Promise.all([
+            authorizedFetch("/api/stats/summary"),
+            authorizedFetch("/api/invoices"),
+            authorizedFetch("/api/stats/monthly-revenue"),
+            authorizedFetch("/api/stats/branch-revenue")
+        ]);
         if (!summary) { mainContent.innerHTML = `<div class="alert alert-danger">Could not load dashboard stats.</div>`; return; }
 
         mainContent.innerHTML = `
@@ -232,7 +237,129 @@ document.addEventListener("DOMContentLoaded", () => {
                 <div class="col-xl-3 col-md-6 mb-4"><div class="card"><div class="card-body"><div class="d-flex align-items-center"><i class="bi bi-calendar-check-fill fs-2 text-success me-3"></i><div><div class="text-muted">Scheduled Appointments</div><div class="h5 fw-bold">${summary.appointments}</div></div></div></div></div></div>
                 <div class="col-xl-3 col-md-6 mb-4"><div class="card"><div class="card-body"><div class="d-flex align-items-center"><i class="bi bi-heart-pulse-fill fs-2 text-info me-3"></i><div><div class="text-muted">Active Doctors</div><div class="h5 fw-bold">${summary.doctors}</div></div></div></div></div></div>
                 <div class="col-xl-3 col-md-6 mb-4"><div class="card"><div class="card-body"><div class="d-flex align-items-center"><i class="bi bi-cash-stack fs-2 text-warning me-3"></i><div><div class="text-muted">Total Revenue</div><div class="h5 fw-bold">Rs.${(invoices?.reduce((sum, inv) => sum + (parseFloat(inv.total_amount) - parseFloat(inv.due_amount)), 0) || 0).toFixed(2)}</div></div></div></div></div></div>
-            </div>`;
+            </div>
+            <div class="row mt-4">
+                <div class="col-lg-8 mb-4">
+                    <div class="card">
+                        <div class="card-header bg-light">
+                            <h5 class="mb-0">Monthly Revenue (Yearly)</h5>
+                        </div>
+                        <div class="card-body">
+                            <canvas id="monthly-revenue-chart" height="80"></canvas>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-lg-4 mb-4">
+                    <div class="card">
+                        <div class="card-header bg-light">
+                            <h5 class="mb-0">Revenue by Branch</h5>
+                        </div>
+                        <div class="card-body d-flex justify-content-center">
+                            <div style="width: 100%; max-width: 300px;">
+                                <canvas id="branch-revenue-chart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        renderMonthlyRevenueChart(monthlyRevenue);
+        renderBranchRevenueChart(branchRevenue);
+    };
+
+    const renderMonthlyRevenueChart = (data) => {
+        const ctx = document.getElementById('monthly-revenue-chart');
+        if (!ctx) return;
+
+        const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+        const revenues = new Array(12).fill(0);
+
+        data?.forEach(item => {
+            const monthIndex = parseInt(item.month.split('-')[1]) - 1;
+            revenues[monthIndex] = parseFloat(item.total_revenue || 0);
+        });
+
+        new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: months,
+                datasets: [{
+                    label: 'Revenue (Rs.)',
+                    data: revenues,
+                    borderColor: '#6a5af9',
+                    backgroundColor: 'rgba(106, 90, 249, 0.1)',
+                    borderWidth: 3,
+                    fill: true,
+                    tension: 0.4,
+                    pointRadius: 6,
+                    pointBackgroundColor: '#6a5af9',
+                    pointBorderColor: '#fff',
+                    pointBorderWidth: 2,
+                    pointHoverRadius: 8
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: {
+                    legend: {
+                        display: true,
+                        position: 'top',
+                        labels: { font: { size: 12, weight: '500' }, padding: 15 }
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: { callback: value => 'Rs.' + value.toFixed(2) },
+                        grid: { drawBorder: false, color: 'rgba(0, 0, 0, 0.05)' }
+                    },
+                    x: {
+                        grid: { display: false }
+                    }
+                }
+            }
+        });
+    };
+
+    const renderBranchRevenueChart = (data) => {
+        const ctx = document.getElementById('branch-revenue-chart');
+        if (!ctx) return;
+
+        const branchNames = data?.map(item => item.branch_name) || [];
+        const percentages = data?.map(item => parseFloat(item.percentage || 0)) || [];
+        const colors = ['#6a5af9', '#28a745', '#17a2b8', '#ffc107', '#dc3545', '#fd7e14'];
+
+        new Chart(ctx, {
+            type: 'doughnut',
+            data: {
+                labels: branchNames,
+                datasets: [{
+                    data: percentages,
+                    backgroundColor: colors.slice(0, branchNames.length),
+                    borderColor: '#fff',
+                    borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: { font: { size: 11, weight: '500' }, padding: 15 }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return context.label + ': ' + context.parsed + '%';
+                            }
+                        }
+                    }
+                }
+            }
+        });
     };
 
     const loadReportsPage = () => {

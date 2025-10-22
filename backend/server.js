@@ -147,6 +147,40 @@ app.get("/api/stats/summary", authorize(['admin']), async (req, res) => {
     } catch (err) { handleDatabaseError(res, err); }
 });
 
+app.get("/api/stats/monthly-revenue", authorize(['admin']), async (req, res) => {
+    try {
+        const [rows] = await pool.query(`
+            SELECT
+                DATE_FORMAT(i.issued_date, '%Y-%m') AS month,
+                SUM(i.total_amount) AS total_revenue
+            FROM Invoice i
+            WHERE YEAR(i.issued_date) = YEAR(CURDATE())
+            GROUP BY DATE_FORMAT(i.issued_date, '%Y-%m')
+            ORDER BY i.issued_date ASC
+        `);
+        res.json(rows);
+    } catch (err) { handleDatabaseError(res, err); }
+});
+
+app.get("/api/stats/branch-revenue", authorize(['admin']), async (req, res) => {
+    try {
+        const [rows] = await pool.query(`
+            SELECT
+                b.branch_id,
+                b.name AS branch_name,
+                SUM(i.total_amount) AS total_revenue,
+                ROUND(SUM(i.total_amount) / (SELECT SUM(total_amount) FROM Invoice WHERE YEAR(issued_date) = YEAR(CURDATE())) * 100, 2) AS percentage
+            FROM Invoice i
+            JOIN Appointment a ON i.appointment_id = a.appointment_id
+            JOIN Branch b ON a.branch_id = b.branch_id
+            WHERE YEAR(i.issued_date) = YEAR(CURDATE())
+            GROUP BY b.branch_id, b.name
+            ORDER BY total_revenue DESC
+        `);
+        res.json(rows);
+    } catch (err) { handleDatabaseError(res, err); }
+});
+
 app.get("/api/reports/:reportName", authorize(['admin']), async (req, res) => {
     const { reportName } = req.params;
     const viewMap = {
