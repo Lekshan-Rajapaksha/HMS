@@ -24,6 +24,9 @@ DROP TRIGGER IF EXISTS UpdateInvoiceStatusAfterPayment;
 DROP TRIGGER IF EXISTS PreventDoctorDeletionWithAppointments;
 DROP TRIGGER IF EXISTS PreventOverlappingAppointmentsOnUpdate;
 DROP TRIGGER IF EXISTS PreventOverlappingAppointments;
+DROP TRIGGER IF EXISTS PreventOverpayment;
+DROP TRIGGER IF EXISTS ValidatePatientDOB_Insert;
+DROP TRIGGER IF EXISTS ValidatePatientDOB_Update;
 
 -- Drop tables in reverse order of dependencies
 DROP TABLE IF EXISTS Insurance_Claim;
@@ -329,6 +332,59 @@ BEGIN
     END IF;
 END;
 
+CREATE TRIGGER PreventOverpayment
+BEFORE INSERT ON Payment
+FOR EACH ROW
+BEGIN
+    DECLARE v_total_paid DECIMAL(10, 2);
+    DECLARE v_total_amount DECIMAL(10, 2);
+
+    -- Get the total amount of the invoice
+    SELECT total_amount INTO v_total_amount
+    FROM Invoice
+    WHERE invoice_id = NEW.invoice_id;
+
+    -- Get the sum of all payments already made for this invoice
+    SELECT COALESCE(SUM(paid_amount), 0) INTO v_total_paid
+    FROM Payment
+    WHERE invoice_id = NEW.invoice_id;
+
+    -- Check if the new payment exceeds the total bill
+    IF (v_total_paid + NEW.paid_amount) > v_total_amount THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Payment exceeds the total invoice amount. Overpayment is not allowed.';
+    END IF;
+END;
+
+CREATE TRIGGER ValidatePatientDOB_Insert
+BEFORE INSERT ON Patient
+FOR EACH ROW
+BEGIN
+    IF NEW.date_of_birth > CURDATE() THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Date of birth cannot be in the future.';
+    END IF;
+    
+    IF NEW.date_of_birth < DATE_SUB(CURDATE(), INTERVAL 120 YEAR) THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Date of birth cannot be more than 120 years in the past.';
+    END IF;
+END;
+
+CREATE TRIGGER ValidatePatientDOB_Update
+BEFORE UPDATE ON Patient
+FOR EACH ROW
+BEGIN
+    IF NEW.date_of_birth > CURDATE() THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Date of birth cannot be in the future.';
+    END IF;
+    
+    IF NEW.date_of_birth < DATE_SUB(CURDATE(), INTERVAL 120 YEAR) THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Date of birth cannot be more than 120 years in the past.';
+    END IF;
+END;
 -- ============================================
 -- STORED PROCEDURES
 -- ============================================
