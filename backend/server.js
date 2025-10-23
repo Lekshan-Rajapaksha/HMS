@@ -71,7 +71,33 @@ const authorize = (allowedRoles) => {
         }
     };
 };
+const getOptionalBranchInfo = async (req, res, next) => {
+    try {
+        if (req.user && req.user.userId) {
+            const [rows] = await pool.query(`SELECT branch_id FROM Staff WHERE user_id = ?`, [req.user.userId]);
+            if (rows.length > 0) {
+                req.branchId = rows[0].branch_id;
+            }
+        }
+        next();
+    } catch (err) {
+        // Don't block the request, just log it
+        console.error("OptionalBranchInfo Error:", err.message);
+        next();
+    }
+};
 
+// Required middleware to get branch_id for staff
+const getBranchInfoForStaff = async (req, res, next) => {
+    try {
+        const [rows] = await pool.query(`SELECT branch_id FROM Staff WHERE user_id = ?`, [req.user.userId]);
+        if (rows.length === 0 || !rows[0].branch_id) {
+            return res.status(403).json({ message: "Forbidden: You are not assigned to a branch." });
+        }
+        req.branchId = rows[0].branch_id;
+        next();
+    } catch (err) { handleDatabaseError(res, err); }
+};
 // Login Endpoint
 app.post("/api/login", async (req, res) => {
     const { username, password } = req.body;
@@ -111,34 +137,44 @@ app.post("/api/login", async (req, res) => {
 });
 
 // --- GENERIC LISTS (for populating dropdowns) ---
-app.get("/api/list/:type", authorize(['admin', 'receptionist', 'doctor', 'branch manager']), async (req, res) => {
+// server.js - REPLACEMENT /api/list/:type
+app.get("/api/list/:type", authorize(['admin', 'receptionist', 'doctor', 'branch manager']), getOptionalBranchInfo, async (req, res) => {
     const { type } = req.params;
     let query;
+    const params = [];
     try {
         switch (type) {
             case "patients": query = "SELECT patient_id, name FROM Patient ORDER BY name"; break;
-            case "doctors": query = `
-            SELECT d.doctor_id, s.name, GROUP_CONCAT(DISTINCT sp.name SEPARATOR ', ') as specialty
-            FROM Doctor d
-            LEFT JOIN Staff s ON d.staff_id = s.staff_id
-            LEFT JOIN doctor_specialties ds ON d.doctor_id = ds.doctor_id
-            LEFT JOIN Specialties sp ON ds.specialty_id = sp.specialty_id
-            GROUP BY d.doctor_id, s.name
-            ORDER BY s.name
-`; break; case "branches": query = "SELECT branch_id, name FROM Branch ORDER BY name"; break;
+            case "doctors":
+                query = `
+                    SELECT d.doctor_id, s.name, GROUP_CONCAT(DISTINCT sp.name SEPARATOR ', ') as specialty, s.branch_id
+                    FROM Doctor d
+                    LEFT JOIN Staff s ON d.staff_id = s.staff_id
+                    LEFT JOIN doctor_specialties ds ON d.doctor_id = ds.doctor_id
+                    LEFT JOIN Specialties sp ON ds.specialty_id = sp.specialty_id
+                `;
+                if (req.user.role === 'receptionist' && req.branchId) {
+                    query += ' WHERE s.branch_id = ?';
+                    params.push(req.branchId);
+                }
+                query += `
+                    GROUP BY d.doctor_id, s.name, s.branch_id
+                    ORDER BY s.name
+                `;
+                break;
+            case "branches": query = "SELECT branch_id, name FROM Branch ORDER BY name"; break;
             case "roles": query = "SELECT role_id, name FROM Role ORDER BY name"; break;
             case "insurance-providers": query = "SELECT id, name FROM Insurance_Provider ORDER BY name"; break;
             case "specialties": query = "SELECT specialty_id, name FROM Specialties ORDER BY name"; break;
             case "treatments": query = "SELECT service_code, name, price FROM Treatment_Catalogue ORDER BY name"; break;
             default: return res.status(404).json({ message: "List type not found" });
         }
-        const [results] = await pool.query(query);
+        const [results] = await pool.query(query, params);
         res.json(results);
     } catch (err) {
         handleDatabaseError(res, err);
     }
 });
-
 
 // =========================================================================================
 // --- ADMIN-SPECIFIC API Endpoints ---
@@ -726,9 +762,20 @@ app.delete("/api/specialties/:id", authorize(['admin']), async (req, res) => {
 
 const commonRoles = ['admin', 'receptionist', 'branch manager'];
 
-app.get("/api/patients", authorize(commonRoles), async (req, res) => {
+app.get("/api/patients", authorize(commonRoles), getBranchInfoForStaff, async (req, res) => {
     try {
-        const [rows] = await pool.query(`SELECT *, TIMESTAMPDIFF(YEAR, date_of_birth, CURDATE()) AS age FROM Patient ORDER BY name`);
+        let query = `SELECT p.*, TIMESTAMPDIFF(YEAR, date_of_birth, CURDATE()) AS age FROM Patient p`;
+        const params = [];
+
+        if (req.user.role === 'receptionist' || req.user.role === 'branch manager') {
+            // Only show patients who have had an appointment at this branch
+            query += ' WHERE EXISTS (SELECT 1 FROM Appointment a WHERE a.patient_id = p.patient_id AND a.branch_id = ?)';
+            params.push(req.branchId);
+        }
+
+        query += ' ORDER BY p.name';
+
+        const [rows] = await pool.query(query, params);
         res.json(rows);
     } catch (err) { handleDatabaseError(res, err); }
 });
@@ -784,16 +831,28 @@ app.get("/api/patients/:id/details", authorize(['receptionist']), async (req, re
 // --- RECEPTIONIST-SPECIFIC API Endpoints ---
 // =========================================================================================
 
-app.get("/api/appointments", authorize(['admin', 'receptionist']), async (req, res) => {
+// server.js - REPLACEMENT /api/appointments
+app.get("/api/appointments", authorize(['admin', 'receptionist']), getBranchInfoForStaff, async (req, res) => {
     try {
-        const [rows] = await pool.query(`SELECT a.*, p.name as patient_name, s.name as doctor_name, b.name as branch_name FROM Appointment a JOIN Patient p ON a.patient_id = p.patient_id JOIN Doctor d ON a.doctor_id = d.doctor_id JOIN Staff s ON d.staff_id = s.staff_id JOIN Branch b ON a.branch_id = b.branch_id ORDER BY a.schedule_date DESC`);
+        let query = `SELECT a.*, p.name as patient_name, s.name as doctor_name, b.name as branch_name FROM Appointment a JOIN Patient p ON a.patient_id = p.patient_id JOIN Doctor d ON a.doctor_id = d.doctor_id JOIN Staff s ON d.staff_id = s.staff_id JOIN Branch b ON a.branch_id = b.branch_id`;
+        const params = [];
+
+        if (req.user.role === 'receptionist') {
+            query += ' WHERE a.branch_id = ?';
+            params.push(req.branchId);
+        }
+
+        query += ' ORDER BY a.schedule_date DESC';
+
+        const [rows] = await pool.query(query, params);
         res.json(rows);
     } catch (err) { handleDatabaseError(res, err); }
 });
 
-app.get("/api/appointments/uninvoiced", authorize(['receptionist']), async (req, res) => {
+// server.js - REPLACEMENT /api/appointments/uninvoiced
+app.get("/api/appointments/uninvoiced", authorize(['receptionist']), getBranchInfoForStaff, async (req, res) => {
     try {
-        const [rows] = await pool.query(`SELECT a.appointment_id, a.schedule_date, p.name AS patient_name, p.insurance_provider_id FROM Appointment a JOIN Patient p ON a.patient_id = p.patient_id LEFT JOIN Invoice i ON a.appointment_id = i.appointment_id WHERE a.status = 'Completed' AND i.invoice_id IS NULL ORDER BY a.schedule_date DESC`);
+        const [rows] = await pool.query(`SELECT a.appointment_id, a.schedule_date, p.name AS patient_name, p.insurance_provider_id FROM Appointment a JOIN Patient p ON a.patient_id = p.patient_id LEFT JOIN Invoice i ON a.appointment_id = i.appointment_id WHERE a.status = 'Completed' AND i.invoice_id IS NULL AND a.branch_id = ? ORDER BY a.schedule_date DESC`, [req.branchId]);
         res.json(rows);
     } catch (err) { handleDatabaseError(res, err); }
 });
@@ -806,12 +865,12 @@ app.get("/api/appointments/:id", authorize(['receptionist']), async (req, res) =
     } catch (err) { handleDatabaseError(res, err); }
 });
 
-app.get("/api/appointments/doctor/:id", authorize(['receptionist']), async (req, res) => {
+app.get("/api/appointments/doctor/:id", authorize(['receptionist']), getBranchInfoForStaff, async (req, res) => {
     try {
         const { id } = req.params;
         const { date } = req.query;
         if (!date) return res.status(400).json({ message: "A date query parameter is required." });
-        const [rows] = await pool.query(`SELECT a.schedule_date, p.name as patient_name FROM Appointment a JOIN Patient p ON a.patient_id = p.patient_id WHERE a.doctor_id = ? AND DATE(a.schedule_date) = ?`, [id, date]);
+        const [rows] = await pool.query(`SELECT a.schedule_date, p.name as patient_name FROM Appointment a JOIN Patient p ON a.patient_id = p.patient_id WHERE a.doctor_id = ? AND DATE(a.schedule_date) = ? AND a.branch_id = ?`, [id, date, req.branchId]);
         res.json(rows);
     } catch (err) { handleDatabaseError(res, err); }
 });
@@ -919,9 +978,10 @@ app.delete("/api/appointments/:id", authorize(['receptionist']), async (req, res
 
 
 // GET All Invoices (Admin + Receptionist)
-app.get("/api/invoices", authorize(['admin', 'receptionist']), async (req, res) => {
+// server.js - REPLACEMENT /api/invoices
+app.get("/api/invoices", authorize(['admin', 'receptionist']), getBranchInfoForStaff, async (req, res) => {
     try {
-        const [rows] = await pool.query(`
+        let query = `
             SELECT
                 i.invoice_id,
                 i.appointment_id,
@@ -938,8 +998,17 @@ app.get("/api/invoices", authorize(['admin', 'receptionist']), async (req, res) 
             FROM Invoice i
             JOIN Appointment a ON i.appointment_id = a.appointment_id
             JOIN Patient p ON a.patient_id = p.patient_id
-            ORDER BY i.issued_date DESC
-        `);
+        `;
+        const params = [];
+
+        if (req.user.role === 'receptionist') {
+            query += ' WHERE a.branch_id = ?';
+            params.push(req.branchId);
+        }
+
+        query += ' ORDER BY i.issued_date DESC';
+
+        const [rows] = await pool.query(query, params);
         res.json(rows);
     } catch (err) { handleDatabaseError(res, err); }
 });
