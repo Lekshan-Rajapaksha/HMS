@@ -21,23 +21,23 @@ document.addEventListener("DOMContentLoaded", () => {
 
     let currentViewData = [];
 
-    // --- GENERIC HELPER FUNCTIONS ---
-    const showToast = (message, type = 'success') => {
-        const toastId = 'toast-' + Math.random().toString(36).substring(2, 9);
-        const icon = type === 'success' ? 'check-circle-fill' : 'exclamation-triangle-fill';
-        const toastHTML = `
-            <div id="${toastId}" class="toast align-items-center text-bg-${type} border-0" role="alert" aria-live="assertive" aria-atomic="true">
-                <div class="d-flex">
-                    <div class="toast-body"><i class="bi bi-${icon} me-2"></i>${message}</div>
-                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
-                </div>
-            </div>`;
-        toastContainer.insertAdjacentHTML('beforeend', toastHTML);
-        const toastEl = document.getElementById(toastId);
-        const toast = new bootstrap.Toast(toastEl, { delay: 4000 });
-        toast.show();
-        toastEl.addEventListener('hidden.bs.toast', () => toastEl.remove());
-    };
+    // --- GENERIC HELPER FUNCTIONS ---
+    const showToast = (message, type = 'success') => {
+        const toastId = 'toast-' + Math.random().toString(36).substring(2, 9);
+        const icon = type === 'success' ? 'check-circle-fill' : 'exclamation-triangle-fill';
+        const toastHTML = `
+            <div id="${toastId}" class="toast align-items-center text-bg-${type} border-0" role="alert" aria-live="assertive" aria-atomic="true">
+                <div class="d-flex">
+                    <div class="toast-body"><i class="bi bi-${icon} me-2"></i>${message}</div>
+                    <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+                </div>
+            </div>`;
+        toastContainer.insertAdjacentHTML('beforeend', toastHTML);
+        const toastEl = document.getElementById(toastId);
+        const toast = new bootstrap.Toast(toastEl, { delay: 4000 });
+        toast.show();
+        toastEl.addEventListener('hidden.bs.toast', () => toastEl.remove());
+    };
 
     const authorizedFetch = async (endpoint, options = {}) => {
         const defaultOptions = { headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` } };
@@ -991,6 +991,7 @@ document.addEventListener("DOMContentLoaded", () => {
             <div class="modal-footer mt-4"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button><button type="submit" class="btn btn-primary">Save</button></div>
         </form>`;
 
+        formModal.show();
         formModal.show();
 
         const roleSelect = formModalBody.querySelector('[name="role_id"]');

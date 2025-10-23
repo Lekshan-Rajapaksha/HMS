@@ -2,6 +2,9 @@
 require('dotenv').config();
 
 const express = require("express");
+require('dotenv').config();
+console.log('Database User from .env:', process.env.DB_USER);
+console.log('Database Name from .env:', process.env.DB_NAME);
 const mysql = require("mysql2/promise");
 const cors = require("cors");
 const jwt = require('jsonwebtoken');
