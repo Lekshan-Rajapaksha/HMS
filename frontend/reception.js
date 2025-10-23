@@ -95,17 +95,75 @@ document.addEventListener("DOMContentLoaded", () => {
         tableBody.innerHTML = schedules.map(doc => `<tr><td>${doc.name}</td><td>${doc.specialty}</td><td><ul class="time-slot-list">${doc.appointments.length > 0 ? doc.appointments.map(a => `<li class="booked"><strong>${new Date(a.schedule_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</strong><br><small>${a.patient_name}</small></li>`).join('') : '<li class="text-muted small">No bookings</li>'}</ul></td><td><ul class="time-slot-list">${doc.availability.length > 0 ? doc.availability.map(s => `<li class="available">${s}</li>`).join('') : '<li class="text-muted small">No available slots</li>'}</ul></td></tr>`).join('');
     };
 
-    const renderInvoicesTable = data => {
+    const renderInvoicesTable = (data, filterStatus = null) => {
         const tableBody = document.getElementById("table-body");
         if (!data || data.length === 0) { renderNoData(tableBody, 'No invoices found.'); return; }
+
         const statusColors = { 'Pending': 'warning', 'Paid': 'success', 'Partially Paid': 'info', 'Overdue': 'danger' };
-        tableBody.innerHTML = data.map(i => `<tr><td>${i.invoice_id}</td><td>${i.patient_name}</td><td>Rs.${Number(i.total_amount).toFixed(2)}</td><td>Rs.${Number(i.due_amount).toFixed(2)}</td><td><span class="badge bg-${statusColors[i.status] || 'secondary'}">${i.status}</span></td><td>${new Date(i.due_date).toLocaleDateString()}</td><td class="table-actions">${i.status !== 'Paid' ? `<button class="btn btn-sm btn-outline-success" data-action="pay" data-type="invoice" data-id="${i.invoice_id}" data-due="${i.due_amount}"><i class="bi bi-cash-coin"></i></button>` : ''}<button class="btn btn-sm btn-outline-danger" data-action="delete" data-type="invoice" data-id="${i.invoice_id}"><i class="bi bi-trash-fill"></i></button></td></tr>`).join("");
+
+        // Filter by status if provided
+        let filtered = data;
+        if (filterStatus) {
+            filtered = data.filter(i => i.status === filterStatus);
+        }
+
+        if (filtered.length === 0) { renderNoData(tableBody, `No ${filterStatus.toLowerCase()} invoices found.`); return; }
+
+        // Sort by due_date with soonest first
+        filtered.sort((a, b) => new Date(a.due_date) - new Date(b.due_date));
+
+        tableBody.innerHTML = filtered.map(i => `<tr><td>${i.invoice_id}</td><td>${i.patient_name}</td><td>Rs.${Number(i.total_amount).toFixed(2)}</td><td>Rs.${Number(i.due_amount).toFixed(2)}</td><td><span class="badge bg-${statusColors[i.status] || 'secondary'}">${i.status}</span></td><td>${new Date(i.due_date).toLocaleDateString()}</td><td class="table-actions">${i.status !== 'Paid' ? `<button class="btn btn-sm btn-outline-success" data-action="pay" data-type="invoice" data-id="${i.invoice_id}" data-due="${i.due_amount}"><i class="bi bi-cash-coin"></i></button>` : ''}<button class="btn btn-sm btn-outline-danger" data-action="delete" data-type="invoice" data-id="${i.invoice_id}"><i class="bi bi-trash-fill"></i></button></td></tr>`).join("");
     };
 
     // PAGE LOADERS
     const loadPatientsPage = async () => { createPageTemplate({ title: "Patients", type: "patient", headers: ["ID", "Name", "Age", "Contact"] }); renderSpinner(document.getElementById('table-body')); currentViewData = await authorizedFetch("/api/patients"); renderPatientsTable(currentViewData); setupSearch(renderPatientsTable, ['patient_id', 'name', 'contact_info']); };
     const loadAppointmentsPage = async () => { createPageTemplate({ title: "Appointments", type: "appointment", headers: ["ID", "Date", "Patient", "Doctor", "Status"] }); renderSpinner(document.getElementById('table-body')); currentViewData = await authorizedFetch("/api/appointments"); renderAppointmentsTable(currentViewData); setupSearch(renderAppointmentsTable, ['appointment_id', 'patient_name', 'doctor_name']); };
-    const loadInvoicesPage = async () => { createPageTemplate({ title: "Invoicing", type: "invoice", headers: ["ID", "Patient", "Total", "Due", "Status", "Due Date"] }); renderSpinner(document.getElementById('table-body')); currentViewData = await authorizedFetch("/api/invoices"); renderInvoicesTable(currentViewData); setupSearch(renderInvoicesTable, ['invoice_id', 'patient_name']); };
+    const loadInvoicesPage = async () => {
+        createPageTemplate({ title: "Invoicing", type: "invoice", headers: ["ID", "Patient", "Total", "Due", "Status", "Due Date"] });
+
+        // Add filter buttons
+        const pageHeader = document.querySelector('.page-header');
+        const filterContainer = document.createElement('div');
+        filterContainer.className = 'invoice-filters ms-auto';
+        filterContainer.innerHTML = `
+            <div class="btn-group" role="group">
+                <button type="button" class="btn btn-outline-primary filter-btn active" data-status="all">All</button>
+                <button type="button" class="btn btn-outline-primary filter-btn" data-status="Partially Paid">Partially Paid</button>
+                <button type="button" class="btn btn-outline-primary filter-btn" data-status="Pending">Pending</button>
+                <button type="button" class="btn btn-outline-primary filter-btn" data-status="Paid">Paid</button>
+            </div>
+        `;
+        pageHeader.appendChild(filterContainer);
+
+        let currentFilter = 'all';
+
+        // Fetch data
+        renderSpinner(document.getElementById('table-body'));
+        currentViewData = await authorizedFetch("/api/invoices");
+        console.log('Invoice data fetched:', currentViewData);
+        console.log('Unique statuses:', currentViewData ? [...new Set(currentViewData.map(i => i.status))] : []);
+        console.log('Pending count:', currentViewData ? currentViewData.filter(i => i.status === 'Pending').length : 0);
+        console.log('Sample invoice:', currentViewData && currentViewData.length > 0 ? currentViewData[0] : 'No data');
+        renderInvoicesTable(currentViewData);
+
+        // Filter button handlers
+        document.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+                e.target.classList.add('active');
+                currentFilter = e.target.dataset.status;
+                const filtered = currentFilter === 'all' ? currentViewData : currentViewData.filter(i => i.status === currentFilter);
+                console.log('Filter clicked:', currentFilter, 'Filtered count:', filtered.length);
+                renderInvoicesTable(filtered, currentFilter === 'all' ? null : currentFilter);
+            });
+        });
+
+        // Setup search
+        setupSearch((filtered) => {
+            const finalFiltered = currentFilter === 'all' ? filtered : filtered.filter(i => i.status === currentFilter);
+            renderInvoicesTable(finalFiltered, currentFilter === 'all' ? null : currentFilter);
+        }, ['invoice_id', 'patient_name']);
+    };
 
     const loadSchedulesPage = () => {
         createPageTemplate({ title: "Doctor Schedules", type: "schedule", headers: ["Doctor", "Specialty", "Booked Slots", "Available Slots"], showAddBtn: false, showSearch: false });

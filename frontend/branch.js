@@ -307,9 +307,16 @@ document.addEventListener("DOMContentLoaded", () => {
         setupSearch(renderStaffTable, ['staff_id', 'name', 'role_name', 'specialty_name']);
     };
 
-    const renderInvoicesTable = (data) => {
+    const renderInvoicesTable = (data, filterStatus = null) => {
         const statusColors = { Paid: 'success', 'Partially Paid': 'warning', Pending: 'danger' };
-        renderTable(data, ["ID", "Patient", "Total", "Due", "Status", "Due Date"],
+
+        // Filter by status if provided
+        let filtered = data;
+        if (filterStatus) {
+            filtered = data.filter(i => i.status === filterStatus);
+        }
+
+        renderTable(filtered, ["ID", "Patient", "Total", "Due", "Status", "Due Date"],
             i => `<tr>
                 <td>#${i.invoice_id}</td>
                 <td>${i.patient_name}</td>
@@ -321,17 +328,54 @@ document.addEventListener("DOMContentLoaded", () => {
                     ${i.status !== 'Paid' ? `<button class="btn btn-sm btn-outline-success" data-action="pay" data-type="invoice" data-id="${i.invoice_id}" title="Record Payment"><i class="bi bi-cash-coin"></i></button>` : ''}
                 </td>
             </tr>`,
-            "No invoices found for this branch."
+            filtered.length === 0 ? (filterStatus ? `No ${filterStatus.toLowerCase()} invoices found.` : "No invoices found for this branch.") : "No invoices found for this branch."
         );
     };
 
     const loadInvoicesPage = async () => {
         createPageTemplate({ title: "Branch Billing", type: "invoice", headers: ["ID", "Patient", "Total", "Due", "Status", "Due Date"], showAddBtn: false });
+
+        // Add filter buttons
+        const pageHeader = document.querySelector('.page-header');
+        const filterContainer = document.createElement('div');
+        filterContainer.className = 'invoice-filters ms-auto';
+        filterContainer.innerHTML = `
+            <div class="btn-group" role="group">
+                <button type="button" class="btn btn-outline-primary filter-btn active" data-status="all">All</button>
+                <button type="button" class="btn btn-outline-primary filter-btn" data-status="Partially Paid">Partially Paid</button>
+                <button type="button" class="btn btn-outline-primary filter-btn" data-status="Pending">Pending</button>
+                <button type="button" class="btn btn-outline-primary filter-btn" data-status="Paid">Paid</button>
+            </div>
+        `;
+        pageHeader.appendChild(filterContainer);
+
+        let currentFilter = 'all';
+
+        // Fetch data
         renderSpinner(document.getElementById("table-body"));
         currentViewData = await authorizedFetch("/api/branch-manager/invoices");
         if (!currentViewData) return;
+        console.log('Branch invoice data fetched:', currentViewData);
+        console.log('Unique statuses:', [...new Set(currentViewData.map(i => i.status))]);
+        console.log('Pending count:', currentViewData.filter(i => i.status === 'Pending').length);
         renderInvoicesTable(currentViewData);
-        setupSearch(renderInvoicesTable, ['invoice_id', 'patient_name', 'status']);
+
+        // Filter button handlers
+        document.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+                e.target.classList.add('active');
+                currentFilter = e.target.dataset.status;
+                const filtered = currentFilter === 'all' ? currentViewData : currentViewData.filter(i => i.status === currentFilter);
+                renderInvoicesTable(filtered, currentFilter === 'all' ? null : currentFilter);
+            });
+        });
+
+        // Setup search
+        setupSearch((filtered) => {
+            const finalFiltered = currentFilter === 'all' ? filtered : filtered.filter(i => i.status === currentFilter);
+            renderInvoicesTable(finalFiltered, currentFilter === 'all' ? null : currentFilter);
+        }, ['invoice_id', 'patient_name', 'status']);
     };
 
     const loadReportsPage = async () => {

@@ -921,7 +921,25 @@ app.delete("/api/appointments/:id", authorize(['receptionist']), async (req, res
 // GET All Invoices (Admin + Receptionist)
 app.get("/api/invoices", authorize(['admin', 'receptionist']), async (req, res) => {
     try {
-        const [rows] = await pool.query(`SELECT i.*, p.name as patient_name FROM Invoice i JOIN Appointment a ON i.appointment_id = a.appointment_id JOIN Patient p ON a.patient_id = p.patient_id ORDER BY i.issued_date DESC`);
+        const [rows] = await pool.query(`
+            SELECT
+                i.invoice_id,
+                i.appointment_id,
+                i.total_amount,
+                i.due_amount,
+                i.issued_date,
+                i.due_date,
+                p.name as patient_name,
+                CASE
+                    WHEN i.due_amount <= 0 THEN 'Paid'
+                    WHEN COALESCE((SELECT SUM(paid_amount) FROM Payment WHERE invoice_id = i.invoice_id), 0) > 0 THEN 'Partially Paid'
+                    ELSE 'Pending'
+                END as status
+            FROM Invoice i
+            JOIN Appointment a ON i.appointment_id = a.appointment_id
+            JOIN Patient p ON a.patient_id = p.patient_id
+            ORDER BY i.issued_date DESC
+        `);
         res.json(rows);
     } catch (err) { handleDatabaseError(res, err); }
 });
@@ -1156,7 +1174,24 @@ app.put("/api/branch-manager/staff/:id", authorize(['branch manager']), getBranc
 
 app.get("/api/branch-manager/invoices", authorize(['branch manager']), getBranchInfoFromToken, async (req, res) => {
     try {
-        const [rows] = await pool.query(`SELECT i.invoice_id, i.total_amount, i.status, i.due_date, i.due_amount, p.name as patient_name FROM Invoice i JOIN Appointment a ON i.appointment_id = a.appointment_id JOIN Patient p ON a.patient_id = p.patient_id WHERE a.branch_id = ? ORDER BY i.issued_date DESC`, [req.branchId]);
+        const [rows] = await pool.query(`
+            SELECT
+                i.invoice_id,
+                i.total_amount,
+                i.due_date,
+                i.due_amount,
+                p.name as patient_name,
+                CASE
+                    WHEN i.due_amount <= 0 THEN 'Paid'
+                    WHEN COALESCE((SELECT SUM(paid_amount) FROM Payment WHERE invoice_id = i.invoice_id), 0) > 0 THEN 'Partially Paid'
+                    ELSE 'Pending'
+                END as status
+            FROM Invoice i
+            JOIN Appointment a ON i.appointment_id = a.appointment_id
+            JOIN Patient p ON a.patient_id = p.patient_id
+            WHERE a.branch_id = ?
+            ORDER BY i.issued_date DESC
+        `, [req.branchId]);
         res.json(rows);
     } catch (err) { handleDatabaseError(res, err); }
 });
@@ -1169,8 +1204,8 @@ app.post("/api/branch-manager/invoices/:invoiceId/payments", authorize(['branch 
     const connection = await pool.getConnection();
     try {
         await connection.beginTransaction();
-        const [invRows] = await connection.query(`SELECT i.status FROM Invoice i JOIN Appointment a ON i.appointment_id = a.appointment_id WHERE i.invoice_id = ? AND a.branch_id = ?`, [invoiceId, req.branchId]);
-        if (invRows.length === 0 || invRows[0].status === 'Paid') throw new Error("Invoice not found, not in your branch, or already paid.");
+        const [invRows] = await connection.query(`SELECT i.due_amount FROM Invoice i JOIN Appointment a ON i.appointment_id = a.appointment_id WHERE i.invoice_id = ? AND a.branch_id = ?`, [invoiceId, req.branchId]);
+        if (invRows.length === 0 || invRows[0].due_amount <= 0) throw new Error("Invoice not found, not in your branch, or already paid.");
 
         await connection.query("INSERT INTO Payment (invoice_id, paid_amount, payment_date, method_of_payment, status) VALUES (?, ?, ?, ?, 'Completed')", [invoiceId, paid_amount, payment_date, method_of_payment]);
 
@@ -1202,7 +1237,16 @@ app.delete("/api/branch-manager/appointments/:id", authorize(['branch manager'])
 
 app.get("/api/branch-manager/reports/doctor-revenue", authorize(['branch manager']), getBranchInfoFromToken, async (req, res) => {
     try {
-        const [rows] = await pool.query(`SELECT s.name as doctor_name, SUM(i.total_amount - i.due_amount) as total_revenue FROM Invoice i JOIN Appointment a ON i.appointment_id = a.appointment_id JOIN Doctor d ON a.doctor_id = d.doctor_id JOIN Staff s ON d.staff_id = s.staff_id WHERE a.branch_id = ? AND i.status IN ('Paid', 'Partially Paid') GROUP BY s.staff_id, s.name ORDER BY total_revenue DESC`, [req.branchId]);
+        const [rows] = await pool.query(`
+            SELECT s.name as doctor_name, SUM(COALESCE((SELECT SUM(paid_amount) FROM Payment WHERE invoice_id = i.invoice_id), 0)) as total_revenue
+            FROM Invoice i
+            JOIN Appointment a ON i.appointment_id = a.appointment_id
+            JOIN Doctor d ON a.doctor_id = d.doctor_id
+            JOIN Staff s ON d.staff_id = s.staff_id
+            WHERE a.branch_id = ? AND (i.due_amount <= 0 OR COALESCE((SELECT SUM(paid_amount) FROM Payment WHERE invoice_id = i.invoice_id), 0) > 0)
+            GROUP BY s.staff_id, s.name
+            ORDER BY total_revenue DESC
+        `, [req.branchId]);
         res.json(rows);
     } catch (err) { handleDatabaseError(res, err); }
 });
@@ -1220,9 +1264,18 @@ app.get("/api/branch-manager/reports/yearly-revenue", authorize(['branch manager
             SELECT
                 DATE_FORMAT(i.issued_date, '%Y-%m') AS month,
                 SUM(i.total_amount) AS total_revenue,
-                SUM(CASE WHEN i.status = 'Paid' THEN i.total_amount ELSE 0 END) AS paid_revenue,
-                SUM(CASE WHEN i.status = 'Partially Paid' THEN i.total_amount ELSE 0 END) AS partial_revenue,
-                SUM(CASE WHEN i.status = 'Pending' THEN i.total_amount ELSE 0 END) AS pending_revenue
+                SUM(CASE
+                    WHEN i.due_amount <= 0 THEN i.total_amount
+                    ELSE 0
+                END) AS paid_revenue,
+                SUM(CASE
+                    WHEN i.due_amount > 0 AND COALESCE((SELECT SUM(paid_amount) FROM Payment WHERE invoice_id = i.invoice_id), 0) > 0 THEN i.total_amount
+                    ELSE 0
+                END) AS partial_revenue,
+                SUM(CASE
+                    WHEN i.due_amount > 0 AND COALESCE((SELECT SUM(paid_amount) FROM Payment WHERE invoice_id = i.invoice_id), 0) = 0 THEN i.total_amount
+                    ELSE 0
+                END) AS pending_revenue
             FROM Invoice i
             JOIN Appointment a ON i.appointment_id = a.appointment_id
             WHERE a.branch_id = ? AND YEAR(i.issued_date) = YEAR(CURDATE())
