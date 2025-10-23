@@ -975,11 +975,29 @@ app.delete("/api/invoices/:id", authorize(['receptionist']), async (req, res) =>
 });
 
 app.post("/api/payments", authorize(['receptionist']), async (req, res) => {
+    const connection = await pool.getConnection();
     try {
-        await pool.query("INSERT INTO Payment (invoice_id, paid_amount, payment_date, method_of_payment, status) VALUES (?, ?, ?, ?, 'Completed')", [req.body.invoice_id, req.body.paid_amount, req.body.payment_date, req.body.method_of_payment]);
+        await connection.beginTransaction();
+
+        // Insert the payment
+        await connection.query("INSERT INTO Payment (invoice_id, paid_amount, payment_date, method_of_payment, status) VALUES (?, ?, ?, ?, 'Completed')", [req.body.invoice_id, req.body.paid_amount, req.body.payment_date, req.body.method_of_payment]);
+
+        // Get the invoice total and calculate new due_amount
+        const [[invoice]] = await connection.query("SELECT total_amount FROM Invoice WHERE invoice_id = ?", [req.body.invoice_id]);
+        const [[payment]] = await connection.query("SELECT COALESCE(SUM(paid_amount), 0) as total_paid FROM Payment WHERE invoice_id = ?", [req.body.invoice_id]);
+
+        const new_due_amount = Math.max(0, invoice.total_amount - payment.total_paid);
+
+        // Update the invoice's due_amount
+        await connection.query("UPDATE Invoice SET due_amount = ? WHERE invoice_id = ?", [new_due_amount, req.body.invoice_id]);
+
+        await connection.commit();
         res.status(201).json({ message: "Payment recorded successfully" });
     } catch (err) {
+        await connection.rollback();
         handleDatabaseError(res, err);
+    } finally {
+        connection.release();
     }
 });
 
@@ -1204,10 +1222,17 @@ app.post("/api/branch-manager/invoices/:invoiceId/payments", authorize(['branch 
     const connection = await pool.getConnection();
     try {
         await connection.beginTransaction();
-        const [invRows] = await connection.query(`SELECT i.due_amount FROM Invoice i JOIN Appointment a ON i.appointment_id = a.appointment_id WHERE i.invoice_id = ? AND a.branch_id = ?`, [invoiceId, req.branchId]);
+        const [invRows] = await connection.query(`SELECT i.due_amount, i.total_amount FROM Invoice i JOIN Appointment a ON i.appointment_id = a.appointment_id WHERE i.invoice_id = ? AND a.branch_id = ?`, [invoiceId, req.branchId]);
         if (invRows.length === 0 || invRows[0].due_amount <= 0) throw new Error("Invoice not found, not in your branch, or already paid.");
 
         await connection.query("INSERT INTO Payment (invoice_id, paid_amount, payment_date, method_of_payment, status) VALUES (?, ?, ?, ?, 'Completed')", [invoiceId, paid_amount, payment_date, method_of_payment]);
+
+        // Get the invoice total and calculate new due_amount
+        const [[payment]] = await connection.query("SELECT COALESCE(SUM(paid_amount), 0) as total_paid FROM Payment WHERE invoice_id = ?", [invoiceId]);
+        const new_due_amount = Math.max(0, invRows[0].total_amount - payment.total_paid);
+
+        // Update the invoice's due_amount
+        await connection.query("UPDATE Invoice SET due_amount = ? WHERE invoice_id = ?", [new_due_amount, invoiceId]);
 
         await connection.commit();
         res.status(201).json({ message: "Payment recorded successfully" });
