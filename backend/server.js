@@ -1680,5 +1680,5 @@ app.put("/api/profile/change-password", authorize(['admin', 'receptionist', 'bra
 });
 // KEEP THIS BLOCK AT THE END OF YOUR FILE
 app.listen(PORT, host, () => {
-    console.log(`🚀 Server is running on ${host}:${PORT}`);
+    console.log(`Server is running on ${host}:${PORT}`);
 });
