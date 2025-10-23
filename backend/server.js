@@ -114,25 +114,51 @@ app.post("/api/login", async (req, res) => {
 app.get("/api/list/:type", authorize(['admin', 'receptionist', 'doctor', 'branch manager']), async (req, res) => {
     const { type } = req.params;
     let query;
+    let params = [];
     try {
+        // Get branch_id for receptionist filtering
+        let receptionistBranchId = null;
+        if (req.user.role === 'receptionist') {
+            const [[staff]] = await pool.query('SELECT branch_id FROM Staff WHERE user_id = ?', [req.user.userId]);
+            if (!staff || !staff.branch_id) {
+                return res.status(403).json({ message: 'Receptionist not assigned to any branch.' });
+            }
+            receptionistBranchId = staff.branch_id;
+        }
+
         switch (type) {
             case "patients": query = "SELECT patient_id, name FROM Patient ORDER BY name"; break;
-            case "doctors": query = `
-            SELECT d.doctor_id, s.name, GROUP_CONCAT(DISTINCT sp.name SEPARATOR ', ') as specialty
-            FROM Doctor d
-            LEFT JOIN Staff s ON d.staff_id = s.staff_id
-            LEFT JOIN doctor_specialties ds ON d.doctor_id = ds.doctor_id
-            LEFT JOIN Specialties sp ON ds.specialty_id = sp.specialty_id
-            GROUP BY d.doctor_id, s.name
-            ORDER BY s.name
-`; break; case "branches": query = "SELECT branch_id, name FROM Branch ORDER BY name"; break;
+            case "doctors":
+                query = `
+                    SELECT d.doctor_id, s.name, GROUP_CONCAT(DISTINCT sp.name SEPARATOR ', ') as specialty
+                    FROM Doctor d
+                    LEFT JOIN Staff s ON d.staff_id = s.staff_id
+                    LEFT JOIN doctor_specialties ds ON d.doctor_id = ds.doctor_id
+                    LEFT JOIN Specialties sp ON ds.specialty_id = sp.specialty_id`;
+                if (receptionistBranchId) {
+                    query += ` WHERE s.branch_id = ?`;
+                    params.push(receptionistBranchId);
+                }
+                query += `
+                    GROUP BY d.doctor_id, s.name
+                    ORDER BY s.name`;
+                break;
+            case "branches":
+                if (receptionistBranchId) {
+                    // Receptionist can only see their own branch
+                    query = "SELECT branch_id, name FROM Branch WHERE branch_id = ? ORDER BY name";
+                    params.push(receptionistBranchId);
+                } else {
+                    query = "SELECT branch_id, name FROM Branch ORDER BY name";
+                }
+                break;
             case "roles": query = "SELECT role_id, name FROM Role ORDER BY name"; break;
             case "insurance-providers": query = "SELECT id, name FROM Insurance_Provider ORDER BY name"; break;
             case "specialties": query = "SELECT specialty_id, name FROM Specialties ORDER BY name"; break;
             case "treatments": query = "SELECT service_code, name, price FROM Treatment_Catalogue ORDER BY name"; break;
             default: return res.status(404).json({ message: "List type not found" });
         }
-        const [results] = await pool.query(query);
+        const [results] = await pool.query(query, params);
         res.json(results);
     } catch (err) {
         handleDatabaseError(res, err);
@@ -786,14 +812,34 @@ app.get("/api/patients/:id/details", authorize(['receptionist']), async (req, re
 
 app.get("/api/appointments", authorize(['admin', 'receptionist']), async (req, res) => {
     try {
-        const [rows] = await pool.query(`SELECT a.*, p.name as patient_name, s.name as doctor_name, b.name as branch_name FROM Appointment a JOIN Patient p ON a.patient_id = p.patient_id JOIN Doctor d ON a.doctor_id = d.doctor_id JOIN Staff s ON d.staff_id = s.staff_id JOIN Branch b ON a.branch_id = b.branch_id ORDER BY a.schedule_date DESC`);
+        let query = `SELECT a.*, p.name as patient_name, s.name as doctor_name, b.name as branch_name FROM Appointment a JOIN Patient p ON a.patient_id = p.patient_id JOIN Doctor d ON a.doctor_id = d.doctor_id JOIN Staff s ON d.staff_id = s.staff_id JOIN Branch b ON a.branch_id = b.branch_id`;
+        let params = [];
+
+        // If user is receptionist, filter by their branch
+        if (req.user.role === 'receptionist') {
+            const [[staff]] = await pool.query('SELECT branch_id FROM Staff WHERE user_id = ?', [req.user.userId]);
+            if (!staff || !staff.branch_id) {
+                return res.status(403).json({ message: 'Receptionist not assigned to any branch.' });
+            }
+            query += ' WHERE a.branch_id = ?';
+            params.push(staff.branch_id);
+        }
+
+        query += ' ORDER BY a.schedule_date DESC';
+        const [rows] = await pool.query(query, params);
         res.json(rows);
     } catch (err) { handleDatabaseError(res, err); }
 });
 
 app.get("/api/appointments/uninvoiced", authorize(['receptionist']), async (req, res) => {
     try {
-        const [rows] = await pool.query(`SELECT a.appointment_id, a.schedule_date, p.name AS patient_name, p.insurance_provider_id FROM Appointment a JOIN Patient p ON a.patient_id = p.patient_id LEFT JOIN Invoice i ON a.appointment_id = i.appointment_id WHERE a.status = 'Completed' AND i.invoice_id IS NULL ORDER BY a.schedule_date DESC`);
+        // Get receptionist's branch
+        const [[staff]] = await pool.query('SELECT branch_id FROM Staff WHERE user_id = ?', [req.user.userId]);
+        if (!staff || !staff.branch_id) {
+            return res.status(403).json({ message: 'Receptionist not assigned to any branch.' });
+        }
+
+        const [rows] = await pool.query(`SELECT a.appointment_id, a.schedule_date, p.name AS patient_name, p.insurance_provider_id FROM Appointment a JOIN Patient p ON a.patient_id = p.patient_id LEFT JOIN Invoice i ON a.appointment_id = i.appointment_id WHERE a.status = 'Completed' AND i.invoice_id IS NULL AND a.branch_id = ? ORDER BY a.schedule_date DESC`, [staff.branch_id]);
         res.json(rows);
     } catch (err) { handleDatabaseError(res, err); }
 });
@@ -811,7 +857,14 @@ app.get("/api/appointments/doctor/:id", authorize(['receptionist']), async (req,
         const { id } = req.params;
         const { date } = req.query;
         if (!date) return res.status(400).json({ message: "A date query parameter is required." });
-        const [rows] = await pool.query(`SELECT a.schedule_date, p.name as patient_name FROM Appointment a JOIN Patient p ON a.patient_id = p.patient_id WHERE a.doctor_id = ? AND DATE(a.schedule_date) = ?`, [id, date]);
+
+        // Get receptionist's branch
+        const [[staff]] = await pool.query('SELECT branch_id FROM Staff WHERE user_id = ?', [req.user.userId]);
+        if (!staff || !staff.branch_id) {
+            return res.status(403).json({ message: 'Receptionist not assigned to any branch.' });
+        }
+
+        const [rows] = await pool.query(`SELECT a.schedule_date, p.name as patient_name FROM Appointment a JOIN Patient p ON a.patient_id = p.patient_id WHERE a.doctor_id = ? AND DATE(a.schedule_date) = ? AND a.branch_id = ?`, [id, date, staff.branch_id]);
         res.json(rows);
     } catch (err) { handleDatabaseError(res, err); }
 });
