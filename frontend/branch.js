@@ -285,6 +285,7 @@ document.addEventListener("DOMContentLoaded", () => {
         renderAppointmentsTable(currentViewData);
         setupSearch(renderAppointmentsTable, ['appointment_id', 'patient_name', 'doctor_name']);
     };
+
     const renderStaffTable = (data) => {
         renderTable(data, ["ID", "Name", "Role", "Specialty", "Contact"],
             s => `<tr>
@@ -847,6 +848,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (action === "add" && type === "staff") openStaffForm();
         if (action === "pay" && type === "invoice") openPaymentForm(id);
     });
+
     const initializeDashboard = async () => {
         userProfile = await authorizedFetch("/api/branch-manager/profile");
         if (userProfile) {
