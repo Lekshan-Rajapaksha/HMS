@@ -974,7 +974,7 @@ app.delete("/api/appointments/:id", authorize(['receptionist']), async (req, res
 // GET All Invoices (Admin + Receptionist)
 app.get("/api/invoices", authorize(['admin', 'receptionist']), async (req, res) => {
     try {
-        const [rows] = await pool.query(`
+        let query = `
             SELECT
                 i.invoice_id,
                 i.appointment_id,
@@ -990,9 +990,22 @@ app.get("/api/invoices", authorize(['admin', 'receptionist']), async (req, res) 
                 END as status
             FROM Invoice i
             JOIN Appointment a ON i.appointment_id = a.appointment_id
-            JOIN Patient p ON a.patient_id = p.patient_id
-            ORDER BY i.issued_date DESC
-        `);
+            JOIN Patient p ON a.patient_id = p.patient_id`;
+
+        let params = [];
+
+        // If user is receptionist, filter by their branch
+        if (req.user.role === 'receptionist') {
+            const [[staff]] = await pool.query('SELECT branch_id FROM Staff WHERE user_id = ?', [req.user.userId]);
+            if (!staff || !staff.branch_id) {
+                return res.status(403).json({ message: 'Receptionist not assigned to any branch.' });
+            }
+            query += ' WHERE a.branch_id = ?';
+            params.push(staff.branch_id);
+        }
+
+        query += ' ORDER BY i.issued_date DESC';
+        const [rows] = await pool.query(query, params);
         res.json(rows);
     } catch (err) { handleDatabaseError(res, err); }
 });
