@@ -114,25 +114,51 @@ app.post("/api/login", async (req, res) => {
 app.get("/api/list/:type", authorize(['admin', 'receptionist', 'doctor', 'branch manager']), async (req, res) => {
     const { type } = req.params;
     let query;
+    let params = [];
     try {
+        // Get branch_id for receptionist filtering
+        let receptionistBranchId = null;
+        if (req.user.role === 'receptionist') {
+            const [[staff]] = await pool.query('SELECT branch_id FROM Staff WHERE user_id = ?', [req.user.userId]);
+            if (!staff || !staff.branch_id) {
+                return res.status(403).json({ message: 'Receptionist not assigned to any branch.' });
+            }
+            receptionistBranchId = staff.branch_id;
+        }
+
         switch (type) {
             case "patients": query = "SELECT patient_id, name FROM Patient ORDER BY name"; break;
-            case "doctors": query = `
-            SELECT d.doctor_id, s.name, GROUP_CONCAT(DISTINCT sp.name SEPARATOR ', ') as specialty
-            FROM Doctor d
-            LEFT JOIN Staff s ON d.staff_id = s.staff_id
-            LEFT JOIN doctor_specialties ds ON d.doctor_id = ds.doctor_id
-            LEFT JOIN Specialties sp ON ds.specialty_id = sp.specialty_id
-            GROUP BY d.doctor_id, s.name
-            ORDER BY s.name
-`; break; case "branches": query = "SELECT branch_id, name FROM Branch ORDER BY name"; break;
+            case "doctors":
+                query = `
+                    SELECT d.doctor_id, s.name, GROUP_CONCAT(DISTINCT sp.name SEPARATOR ', ') as specialty
+                    FROM Doctor d
+                    LEFT JOIN Staff s ON d.staff_id = s.staff_id
+                    LEFT JOIN doctor_specialties ds ON d.doctor_id = ds.doctor_id
+                    LEFT JOIN Specialties sp ON ds.specialty_id = sp.specialty_id`;
+                if (receptionistBranchId) {
+                    query += ` WHERE s.branch_id = ?`;
+                    params.push(receptionistBranchId);
+                }
+                query += `
+                    GROUP BY d.doctor_id, s.name
+                    ORDER BY s.name`;
+                break;
+            case "branches":
+                if (receptionistBranchId) {
+                    // Receptionist can only see their own branch
+                    query = "SELECT branch_id, name FROM Branch WHERE branch_id = ? ORDER BY name";
+                    params.push(receptionistBranchId);
+                } else {
+                    query = "SELECT branch_id, name FROM Branch ORDER BY name";
+                }
+                break;
             case "roles": query = "SELECT role_id, name FROM Role ORDER BY name"; break;
             case "insurance-providers": query = "SELECT id, name FROM Insurance_Provider ORDER BY name"; break;
             case "specialties": query = "SELECT specialty_id, name FROM Specialties ORDER BY name"; break;
             case "treatments": query = "SELECT service_code, name, price FROM Treatment_Catalogue ORDER BY name"; break;
             default: return res.status(404).json({ message: "List type not found" });
         }
-        const [results] = await pool.query(query);
+        const [results] = await pool.query(query, params);
         res.json(results);
     } catch (err) {
         handleDatabaseError(res, err);
@@ -786,14 +812,34 @@ app.get("/api/patients/:id/details", authorize(['receptionist']), async (req, re
 
 app.get("/api/appointments", authorize(['admin', 'receptionist']), async (req, res) => {
     try {
-        const [rows] = await pool.query(`SELECT a.*, p.name as patient_name, s.name as doctor_name, b.name as branch_name FROM Appointment a JOIN Patient p ON a.patient_id = p.patient_id JOIN Doctor d ON a.doctor_id = d.doctor_id JOIN Staff s ON d.staff_id = s.staff_id JOIN Branch b ON a.branch_id = b.branch_id ORDER BY a.schedule_date DESC`);
+        let query = `SELECT a.*, p.name as patient_name, s.name as doctor_name, b.name as branch_name FROM Appointment a JOIN Patient p ON a.patient_id = p.patient_id JOIN Doctor d ON a.doctor_id = d.doctor_id JOIN Staff s ON d.staff_id = s.staff_id JOIN Branch b ON a.branch_id = b.branch_id`;
+        let params = [];
+
+        // If user is receptionist, filter by their branch
+        if (req.user.role === 'receptionist') {
+            const [[staff]] = await pool.query('SELECT branch_id FROM Staff WHERE user_id = ?', [req.user.userId]);
+            if (!staff || !staff.branch_id) {
+                return res.status(403).json({ message: 'Receptionist not assigned to any branch.' });
+            }
+            query += ' WHERE a.branch_id = ?';
+            params.push(staff.branch_id);
+        }
+
+        query += ' ORDER BY a.schedule_date DESC';
+        const [rows] = await pool.query(query, params);
         res.json(rows);
     } catch (err) { handleDatabaseError(res, err); }
 });
 
 app.get("/api/appointments/uninvoiced", authorize(['receptionist']), async (req, res) => {
     try {
-        const [rows] = await pool.query(`SELECT a.appointment_id, a.schedule_date, p.name AS patient_name, p.insurance_provider_id FROM Appointment a JOIN Patient p ON a.patient_id = p.patient_id LEFT JOIN Invoice i ON a.appointment_id = i.appointment_id WHERE a.status = 'Completed' AND i.invoice_id IS NULL ORDER BY a.schedule_date DESC`);
+        // Get receptionist's branch
+        const [[staff]] = await pool.query('SELECT branch_id FROM Staff WHERE user_id = ?', [req.user.userId]);
+        if (!staff || !staff.branch_id) {
+            return res.status(403).json({ message: 'Receptionist not assigned to any branch.' });
+        }
+
+        const [rows] = await pool.query(`SELECT a.appointment_id, a.schedule_date, p.name AS patient_name, p.insurance_provider_id FROM Appointment a JOIN Patient p ON a.patient_id = p.patient_id LEFT JOIN Invoice i ON a.appointment_id = i.appointment_id WHERE a.status = 'Completed' AND i.invoice_id IS NULL AND a.branch_id = ? ORDER BY a.schedule_date DESC`, [staff.branch_id]);
         res.json(rows);
     } catch (err) { handleDatabaseError(res, err); }
 });
@@ -811,7 +857,14 @@ app.get("/api/appointments/doctor/:id", authorize(['receptionist']), async (req,
         const { id } = req.params;
         const { date } = req.query;
         if (!date) return res.status(400).json({ message: "A date query parameter is required." });
-        const [rows] = await pool.query(`SELECT a.schedule_date, p.name as patient_name FROM Appointment a JOIN Patient p ON a.patient_id = p.patient_id WHERE a.doctor_id = ? AND DATE(a.schedule_date) = ?`, [id, date]);
+
+        // Get receptionist's branch
+        const [[staff]] = await pool.query('SELECT branch_id FROM Staff WHERE user_id = ?', [req.user.userId]);
+        if (!staff || !staff.branch_id) {
+            return res.status(403).json({ message: 'Receptionist not assigned to any branch.' });
+        }
+
+        const [rows] = await pool.query(`SELECT a.schedule_date, p.name as patient_name FROM Appointment a JOIN Patient p ON a.patient_id = p.patient_id WHERE a.doctor_id = ? AND DATE(a.schedule_date) = ? AND a.branch_id = ?`, [id, date, staff.branch_id]);
         res.json(rows);
     } catch (err) { handleDatabaseError(res, err); }
 });
@@ -921,7 +974,25 @@ app.delete("/api/appointments/:id", authorize(['receptionist']), async (req, res
 // GET All Invoices (Admin + Receptionist)
 app.get("/api/invoices", authorize(['admin', 'receptionist']), async (req, res) => {
     try {
-        const [rows] = await pool.query(`SELECT i.*, p.name as patient_name FROM Invoice i JOIN Appointment a ON i.appointment_id = a.appointment_id JOIN Patient p ON a.patient_id = p.patient_id ORDER BY i.issued_date DESC`);
+        const [rows] = await pool.query(`
+            SELECT
+                i.invoice_id,
+                i.appointment_id,
+                i.total_amount,
+                i.due_amount,
+                i.issued_date,
+                i.due_date,
+                p.name as patient_name,
+                CASE
+                    WHEN i.due_amount <= 0 THEN 'Paid'
+                    WHEN COALESCE((SELECT SUM(paid_amount) FROM Payment WHERE invoice_id = i.invoice_id), 0) > 0 THEN 'Partially Paid'
+                    ELSE 'Pending'
+                END as status
+            FROM Invoice i
+            JOIN Appointment a ON i.appointment_id = a.appointment_id
+            JOIN Patient p ON a.patient_id = p.patient_id
+            ORDER BY i.issued_date DESC
+        `);
         res.json(rows);
     } catch (err) { handleDatabaseError(res, err); }
 });
@@ -957,11 +1028,29 @@ app.delete("/api/invoices/:id", authorize(['receptionist']), async (req, res) =>
 });
 
 app.post("/api/payments", authorize(['receptionist']), async (req, res) => {
+    const connection = await pool.getConnection();
     try {
-        await pool.query("INSERT INTO Payment (invoice_id, paid_amount, payment_date, method_of_payment, status) VALUES (?, ?, ?, ?, 'Completed')", [req.body.invoice_id, req.body.paid_amount, req.body.payment_date, req.body.method_of_payment]);
+        await connection.beginTransaction();
+
+        // Insert the payment
+        await connection.query("INSERT INTO Payment (invoice_id, paid_amount, payment_date, method_of_payment, status) VALUES (?, ?, ?, ?, 'Completed')", [req.body.invoice_id, req.body.paid_amount, req.body.payment_date, req.body.method_of_payment]);
+
+        // Get the invoice total and calculate new due_amount
+        const [[invoice]] = await connection.query("SELECT total_amount FROM Invoice WHERE invoice_id = ?", [req.body.invoice_id]);
+        const [[payment]] = await connection.query("SELECT COALESCE(SUM(paid_amount), 0) as total_paid FROM Payment WHERE invoice_id = ?", [req.body.invoice_id]);
+
+        const new_due_amount = Math.max(0, invoice.total_amount - payment.total_paid);
+
+        // Update the invoice's due_amount
+        await connection.query("UPDATE Invoice SET due_amount = ? WHERE invoice_id = ?", [new_due_amount, req.body.invoice_id]);
+
+        await connection.commit();
         res.status(201).json({ message: "Payment recorded successfully" });
     } catch (err) {
+        await connection.rollback();
         handleDatabaseError(res, err);
+    } finally {
+        connection.release();
     }
 });
 
@@ -1156,7 +1245,24 @@ app.put("/api/branch-manager/staff/:id", authorize(['branch manager']), getBranc
 
 app.get("/api/branch-manager/invoices", authorize(['branch manager']), getBranchInfoFromToken, async (req, res) => {
     try {
-        const [rows] = await pool.query(`SELECT i.invoice_id, i.total_amount, i.status, i.due_date, i.due_amount, p.name as patient_name FROM Invoice i JOIN Appointment a ON i.appointment_id = a.appointment_id JOIN Patient p ON a.patient_id = p.patient_id WHERE a.branch_id = ? ORDER BY i.issued_date DESC`, [req.branchId]);
+        const [rows] = await pool.query(`
+            SELECT
+                i.invoice_id,
+                i.total_amount,
+                i.due_date,
+                i.due_amount,
+                p.name as patient_name,
+                CASE
+                    WHEN i.due_amount <= 0 THEN 'Paid'
+                    WHEN COALESCE((SELECT SUM(paid_amount) FROM Payment WHERE invoice_id = i.invoice_id), 0) > 0 THEN 'Partially Paid'
+                    ELSE 'Pending'
+                END as status
+            FROM Invoice i
+            JOIN Appointment a ON i.appointment_id = a.appointment_id
+            JOIN Patient p ON a.patient_id = p.patient_id
+            WHERE a.branch_id = ?
+            ORDER BY i.issued_date DESC
+        `, [req.branchId]);
         res.json(rows);
     } catch (err) { handleDatabaseError(res, err); }
 });
@@ -1169,10 +1275,17 @@ app.post("/api/branch-manager/invoices/:invoiceId/payments", authorize(['branch 
     const connection = await pool.getConnection();
     try {
         await connection.beginTransaction();
-        const [invRows] = await connection.query(`SELECT i.status FROM Invoice i JOIN Appointment a ON i.appointment_id = a.appointment_id WHERE i.invoice_id = ? AND a.branch_id = ?`, [invoiceId, req.branchId]);
-        if (invRows.length === 0 || invRows[0].status === 'Paid') throw new Error("Invoice not found, not in your branch, or already paid.");
+        const [invRows] = await connection.query(`SELECT i.due_amount, i.total_amount FROM Invoice i JOIN Appointment a ON i.appointment_id = a.appointment_id WHERE i.invoice_id = ? AND a.branch_id = ?`, [invoiceId, req.branchId]);
+        if (invRows.length === 0 || invRows[0].due_amount <= 0) throw new Error("Invoice not found, not in your branch, or already paid.");
 
         await connection.query("INSERT INTO Payment (invoice_id, paid_amount, payment_date, method_of_payment, status) VALUES (?, ?, ?, ?, 'Completed')", [invoiceId, paid_amount, payment_date, method_of_payment]);
+
+        // Get the invoice total and calculate new due_amount
+        const [[payment]] = await connection.query("SELECT COALESCE(SUM(paid_amount), 0) as total_paid FROM Payment WHERE invoice_id = ?", [invoiceId]);
+        const new_due_amount = Math.max(0, invRows[0].total_amount - payment.total_paid);
+
+        // Update the invoice's due_amount
+        await connection.query("UPDATE Invoice SET due_amount = ? WHERE invoice_id = ?", [new_due_amount, invoiceId]);
 
         await connection.commit();
         res.status(201).json({ message: "Payment recorded successfully" });
@@ -1202,7 +1315,16 @@ app.delete("/api/branch-manager/appointments/:id", authorize(['branch manager'])
 
 app.get("/api/branch-manager/reports/doctor-revenue", authorize(['branch manager']), getBranchInfoFromToken, async (req, res) => {
     try {
-        const [rows] = await pool.query(`SELECT s.name as doctor_name, SUM(i.total_amount - i.due_amount) as total_revenue FROM Invoice i JOIN Appointment a ON i.appointment_id = a.appointment_id JOIN Doctor d ON a.doctor_id = d.doctor_id JOIN Staff s ON d.staff_id = s.staff_id WHERE a.branch_id = ? AND i.status IN ('Paid', 'Partially Paid') GROUP BY s.staff_id, s.name ORDER BY total_revenue DESC`, [req.branchId]);
+        const [rows] = await pool.query(`
+            SELECT s.name as doctor_name, SUM(COALESCE((SELECT SUM(paid_amount) FROM Payment WHERE invoice_id = i.invoice_id), 0)) as total_revenue
+            FROM Invoice i
+            JOIN Appointment a ON i.appointment_id = a.appointment_id
+            JOIN Doctor d ON a.doctor_id = d.doctor_id
+            JOIN Staff s ON d.staff_id = s.staff_id
+            WHERE a.branch_id = ? AND (i.due_amount <= 0 OR COALESCE((SELECT SUM(paid_amount) FROM Payment WHERE invoice_id = i.invoice_id), 0) > 0)
+            GROUP BY s.staff_id, s.name
+            ORDER BY total_revenue DESC
+        `, [req.branchId]);
         res.json(rows);
     } catch (err) { handleDatabaseError(res, err); }
 });
@@ -1220,9 +1342,18 @@ app.get("/api/branch-manager/reports/yearly-revenue", authorize(['branch manager
             SELECT
                 DATE_FORMAT(i.issued_date, '%Y-%m') AS month,
                 SUM(i.total_amount) AS total_revenue,
-                SUM(CASE WHEN i.status = 'Paid' THEN i.total_amount ELSE 0 END) AS paid_revenue,
-                SUM(CASE WHEN i.status = 'Partially Paid' THEN i.total_amount ELSE 0 END) AS partial_revenue,
-                SUM(CASE WHEN i.status = 'Pending' THEN i.total_amount ELSE 0 END) AS pending_revenue
+                SUM(CASE
+                    WHEN i.due_amount <= 0 THEN i.total_amount
+                    ELSE 0
+                END) AS paid_revenue,
+                SUM(CASE
+                    WHEN i.due_amount > 0 AND COALESCE((SELECT SUM(paid_amount) FROM Payment WHERE invoice_id = i.invoice_id), 0) > 0 THEN i.total_amount
+                    ELSE 0
+                END) AS partial_revenue,
+                SUM(CASE
+                    WHEN i.due_amount > 0 AND COALESCE((SELECT SUM(paid_amount) FROM Payment WHERE invoice_id = i.invoice_id), 0) = 0 THEN i.total_amount
+                    ELSE 0
+                END) AS pending_revenue
             FROM Invoice i
             JOIN Appointment a ON i.appointment_id = a.appointment_id
             WHERE a.branch_id = ? AND YEAR(i.issued_date) = YEAR(CURDATE())
