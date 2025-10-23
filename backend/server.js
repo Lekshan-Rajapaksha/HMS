@@ -979,7 +979,7 @@ app.delete("/api/appointments/:id", authorize(['receptionist']), async (req, res
 
 // GET All Invoices (Admin + Receptionist)
 // server.js - REPLACEMENT /api/invoices
-app.get("/api/invoices", authorize(['admin', 'receptionist']), async (req, res) => {
+app.get("/api/invoices", authorize(['admin', 'receptionist']), getBranchInfoForStaff, async (req, res) => {
     try {
         let query = `
             SELECT
