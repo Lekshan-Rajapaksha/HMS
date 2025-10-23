@@ -27,6 +27,9 @@ DROP TRIGGER IF EXISTS PreventOverlappingAppointments;
 DROP TRIGGER IF EXISTS PreventOverpayment;
 DROP TRIGGER IF EXISTS ValidatePatientDOB_Insert;
 DROP TRIGGER IF EXISTS ValidatePatientDOB_Update;
+DROP TRIGGER IF EXISTS PreventTreatmentDeletion;
+DROP TRIGGER IF EXISTS PreventSpecialtyDeletion;
+DROP TRIGGER IF EXISTS PreventInsuranceDeletion;
 
 -- Drop tables in reverse order of dependencies
 DROP TABLE IF EXISTS Insurance_Claim;
@@ -385,6 +388,71 @@ BEGIN
         SET MESSAGE_TEXT = 'Date of birth cannot be more than 120 years in the past.';
     END IF;
 END;
+
+-- Prevent Treatment Catalogue Deletion if used in Appointments
+
+CREATE TRIGGER PreventTreatmentDeletion
+BEFORE DELETE ON Treatment_Catalogue
+FOR EACH ROW
+BEGIN
+    DECLARE treatment_usage_count INT;
+
+    SELECT COUNT(*) INTO treatment_usage_count
+    FROM Appointment_Treatment
+    WHERE service_code = OLD.service_code;
+
+    IF treatment_usage_count > 0 THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Cannot delete treatment. It has been used in one or more appointments.';
+    END IF;
+END;
+
+-- Prevent Specialty Deletion if assigned to Doctors
+
+CREATE TRIGGER PreventSpecialtyDeletion
+BEFORE DELETE ON Specialties
+FOR EACH ROW
+BEGIN
+    DECLARE specialty_assignment_count INT;
+
+    SELECT COUNT(*) INTO specialty_assignment_count
+    FROM doctor_specialties
+    WHERE specialty_id = OLD.specialty_id;
+
+    IF specialty_assignment_count > 0 THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Cannot delete specialty. It has been assigned to one or more doctors.';
+    END IF;
+END;
+
+-- Prevent Insurance Provider Deletion if referenced by Patients or Claims
+
+CREATE TRIGGER PreventInsuranceDeletion
+BEFORE DELETE ON Insurance_Provider
+FOR EACH ROW
+BEGIN
+    DECLARE patient_count INT;
+    DECLARE claim_count INT;
+
+    SELECT COUNT(*) INTO patient_count
+    FROM Patient
+    WHERE insurance_provider_id = OLD.id;
+
+    SELECT COUNT(*) INTO claim_count
+    FROM Insurance_Claim
+    WHERE insurance_provider_id = OLD.id;
+
+    IF patient_count > 0 THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Cannot delete insurance provider. It is referenced by one or more patients.';
+    END IF;
+
+    IF claim_count > 0 THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Cannot delete insurance provider. It has one or more active claims.';
+    END IF;
+END;
+
 -- ============================================
 -- STORED PROCEDURES
 -- ============================================
