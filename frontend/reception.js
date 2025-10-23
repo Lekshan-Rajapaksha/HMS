@@ -35,7 +35,7 @@ document.addEventListener("DOMContentLoaded", () => {
             if ([401, 403].includes(response.status)) { localStorage.removeItem('clinicProToken'); window.location.href = '/index.html'; return null; }
             if (!response.ok) { const err = await response.json(); throw new Error(err.message || `HTTP error! status: ${response.status}`); }
             return response.status === 204 ? null : response.json();
-        } catch (error) { console.error("Fetch error:", error); showToast(`Error: ${error.message}`, 'danger'); return null; }
+        } catch (error) { console.error("Fetch error:", error); showToast(`Error: ${error.message}`, 'danger'); return false; }
     };
 
     const submitForm = async (endpoint, method, data, callback) => {

@@ -57,7 +57,7 @@ document.addEventListener("DOMContentLoaded", () => {
         } catch (error) {
             console.error("Fetch error:", error);
             showToast(error.message, 'danger');
-            return null;
+            return false;
         }
     };
 
