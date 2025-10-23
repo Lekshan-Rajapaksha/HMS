@@ -791,39 +791,11 @@ app.get("/api/appointments", authorize(['admin', 'receptionist']), async (req, r
     } catch (err) { handleDatabaseError(res, err); }
 });
 
-// server.js
-
-// [REPLACE the old /api/appointments/uninvoiced function (line 980) with this new one]
 app.get("/api/appointments/uninvoiced", authorize(['receptionist']), async (req, res) => {
     try {
-        // Since authorize is 'receptionist' only, we always filter.
-        
-        // 1. Find the receptionist's branch_id
-        const [[staff]] = await pool.query(
-            "SELECT branch_id FROM Staff WHERE user_id = ?", 
-            [req.user.userId]
-        );
-        
-        if (!staff || !staff.branch_id) {
-            // Receptionist not assigned to a branch, return empty
-            return res.json([]);
-        }
-
-        // 2. Run the query WITH the branch_id filter
-        const [rows] = await pool.query(
-            `SELECT a.appointment_id, a.schedule_date, p.name AS patient_name, p.insurance_provider_id 
-             FROM Appointment a 
-             JOIN Patient p ON a.patient_id = p.patient_id 
-             LEFT JOIN Invoice i ON a.appointment_id = i.appointment_id 
-             WHERE a.status = 'Completed' AND i.invoice_id IS NULL AND a.branch_id = ?
-             ORDER BY a.schedule_date DESC`,
-            [staff.branch_id] // Pass branch_id as the parameter
-        );
-        
+        const [rows] = await pool.query(`SELECT a.appointment_id, a.schedule_date, p.name AS patient_name, p.insurance_provider_id FROM Appointment a JOIN Patient p ON a.patient_id = p.patient_id LEFT JOIN Invoice i ON a.appointment_id = i.appointment_id WHERE a.status = 'Completed' AND i.invoice_id IS NULL ORDER BY a.schedule_date DESC`);
         res.json(rows);
-    } catch (err) { 
-        handleDatabaseError(res, err); 
-    }
+    } catch (err) { handleDatabaseError(res, err); }
 });
 
 app.get("/api/appointments/:id", authorize(['receptionist']), async (req, res) => {
@@ -834,48 +806,14 @@ app.get("/api/appointments/:id", authorize(['receptionist']), async (req, res) =
     } catch (err) { handleDatabaseError(res, err); }
 });
 
-// server.js
-
-// [REPLACE the old /api/appointments function (line 970) with this new one]
-app.get("/api/appointments", authorize(['admin', 'receptionist']), async (req, res) => {
+app.get("/api/appointments/doctor/:id", authorize(['receptionist']), async (req, res) => {
     try {
-        let baseQuery = `
-            SELECT a.*, p.name as patient_name, s.name as doctor_name, b.name as branch_name 
-            FROM Appointment a 
-            JOIN Patient p ON a.patient_id = p.patient_id 
-            JOIN Doctor d ON a.doctor_id = d.doctor_id 
-            JOIN Staff s ON d.staff_id = s.staff_id 
-            JOIN Branch b ON a.branch_id = b.branch_id
-        `;
-        
-        const queryParams = [];
-
-        // Check the user's role from the token
-        if (req.user.role === 'receptionist') {
-            // Find the receptionist's branch_id
-            const [[staff]] = await pool.query(
-                "SELECT branch_id FROM Staff WHERE user_id = ?", 
-                [req.user.userId]
-            );
-            
-            if (!staff || !staff.branch_id) {
-                // Receptionist not assigned to a branch, return empty
-                return res.json([]);
-            }
-            
-            // Add branch filter to the query
-            baseQuery += " WHERE a.branch_id = ?";
-            queryParams.push(staff.branch_id);
-        }
-
-        baseQuery += " ORDER BY a.schedule_date DESC";
-        
-        const [rows] = await pool.query(baseQuery, queryParams);
+        const { id } = req.params;
+        const { date } = req.query;
+        if (!date) return res.status(400).json({ message: "A date query parameter is required." });
+        const [rows] = await pool.query(`SELECT a.schedule_date, p.name as patient_name FROM Appointment a JOIN Patient p ON a.patient_id = p.patient_id WHERE a.doctor_id = ? AND DATE(a.schedule_date) = ?`, [id, date]);
         res.json(rows);
-
-    } catch (err) { 
-        handleDatabaseError(res, err); 
-    }
+    } catch (err) { handleDatabaseError(res, err); }
 });
 
 app.get("/api/doctors/:id/availability", authorize(['receptionist', 'patient']), async (req, res) => {
@@ -981,12 +919,9 @@ app.delete("/api/appointments/:id", authorize(['receptionist']), async (req, res
 
 
 // GET All Invoices (Admin + Receptionist)
-a// server.js
-
-// [REPLACE the old /api/invoices function (line 1109) with this new one]
 app.get("/api/invoices", authorize(['admin', 'receptionist']), async (req, res) => {
     try {
-        let baseQuery = `
+        const [rows] = await pool.query(`
             SELECT
                 i.invoice_id,
                 i.appointment_id,
@@ -1003,34 +938,10 @@ app.get("/api/invoices", authorize(['admin', 'receptionist']), async (req, res) 
             FROM Invoice i
             JOIN Appointment a ON i.appointment_id = a.appointment_id
             JOIN Patient p ON a.patient_id = p.patient_id
-        `;
-
-        const queryParams = [];
-
-        // Check the user's role from the token
-        if (req.user.role === 'receptionist') {
-            // Find the receptionist's branch_id
-            const [[staff]] = await pool.query(
-                "SELECT branch_id FROM Staff WHERE user_id = ?", 
-                [req.user.userId]
-            );
-            
-            if (!staff || !staff.branch_id) {
-                return res.json([]);
-            }
-            
-            // Add branch filter (by filtering on the Appointment table 'a')
-            baseQuery += " WHERE a.branch_id = ?";
-            queryParams.push(staff.branch_id);
-        }
-
-        baseQuery += " ORDER BY i.issued_date DESC";
-        
-        const [rows] = await pool.query(baseQuery, queryParams);
+            ORDER BY i.issued_date DESC
+        `);
         res.json(rows);
-    } catch (err) { 
-        handleDatabaseError(res, err); 
-    }
+    } catch (err) { handleDatabaseError(res, err); }
 });
 
 app.post("/api/invoices", authorize(['receptionist']), async (req, res) => {
